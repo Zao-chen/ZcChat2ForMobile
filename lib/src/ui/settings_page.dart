@@ -4,7 +4,7 @@ import '../models/app_models.dart';
 import '../repositories/app_repositories.dart';
 import '../services/llm_service.dart';
 
-class SettingsPage extends StatefulWidget {
+class SettingsPage extends StatelessWidget {
   const SettingsPage({
     required this.characterRepository,
     required this.settingsRepository,
@@ -17,15 +17,280 @@ class SettingsPage extends StatefulWidget {
   final Map<LlmProviderType, LlmService> services;
 
   @override
-  State<SettingsPage> createState() => _SettingsPageState();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('设置'),
+      ),
+      body: ListView(
+        children: <Widget>[
+          _SettingsEntry(
+            title: '对话模型',
+            subtitle: 'OpenAI / DeepSeek',
+            icon: Icons.chat_bubble_outline_rounded,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => LlmSettingsHomePage(
+                    settingsRepository: settingsRepository,
+                    services: services,
+                  ),
+                ),
+              );
+            },
+          ),
+          _SettingsEntry(
+            title: '语言合成',
+            subtitle: '保持与 Qt 结构一致，功能暂未移植',
+            icon: Icons.record_voice_over_outlined,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const VitsSettingsPlaceholderPage(),
+                ),
+              );
+            },
+          ),
+          _SettingsEntry(
+            title: '角色设置',
+            subtitle: '当前角色、提示词、立绘大小、运行配置',
+            icon: Icons.face_retouching_natural_outlined,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => CharacterSettingsPage(
+                    characterRepository: characterRepository,
+                    settingsRepository: settingsRepository,
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-class _SettingsPageState extends State<SettingsPage> {
-  final TextEditingController _promptController = TextEditingController();
-  final TextEditingController _apiKeyController = TextEditingController();
+class LlmSettingsHomePage extends StatelessWidget {
+  const LlmSettingsHomePage({
+    required this.settingsRepository,
+    required this.services,
+    super.key,
+  });
 
+  final SettingsRepository settingsRepository;
+  final Map<LlmProviderType, LlmService> services;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('对话模型'),
+      ),
+      body: ListView(
+        children: <Widget>[
+          for (final LlmProviderType provider in LlmProviderType.values)
+            _SettingsEntry(
+              title: provider.label,
+              subtitle: '配置 API Key 并获取模型列表',
+              icon: provider == LlmProviderType.openAI
+                  ? Icons.auto_awesome_outlined
+                  : Icons.memory_rounded,
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ProviderSettingsPage(
+                      provider: provider,
+                      settingsRepository: settingsRepository,
+                      service: services[provider]!,
+                    ),
+                  ),
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class ProviderSettingsPage extends StatefulWidget {
+  const ProviderSettingsPage({
+    required this.provider,
+    required this.settingsRepository,
+    required this.service,
+    super.key,
+  });
+
+  final LlmProviderType provider;
+  final SettingsRepository settingsRepository;
+  final LlmService service;
+
+  @override
+  State<ProviderSettingsPage> createState() => _ProviderSettingsPageState();
+}
+
+class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
+  final TextEditingController _apiKeyController = TextEditingController();
   bool _isLoading = true;
   bool _isFetchingModels = false;
+  AppConfig _appConfig = AppConfig.initial();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _apiKeyController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final AppConfig config = await widget.settingsRepository.loadAppConfig();
+    _appConfig = config;
+    _apiKeyController.text = config.providerConfig(widget.provider).apiKey;
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _saveApiKey(String value) async {
+    await widget.settingsRepository.saveProviderApiKey(widget.provider, value);
+    _appConfig = await widget.settingsRepository.loadAppConfig();
+  }
+
+  Future<void> _fetchModels() async {
+    final String apiKey = _apiKeyController.text.trim();
+    if (apiKey.isEmpty) {
+      _showSnackBar('请先填写 API Key');
+      return;
+    }
+
+    setState(() {
+      _isFetchingModels = true;
+    });
+
+    try {
+      final List<String> models = await widget.service.fetchModels(apiKey);
+      await widget.settingsRepository.saveProviderApiKey(widget.provider, apiKey);
+      await widget.settingsRepository.saveProviderModels(widget.provider, models);
+      _appConfig = await widget.settingsRepository.loadAppConfig();
+      _showSnackBar(models.isEmpty ? '未获取到模型列表' : '模型列表已刷新');
+    } on LlmException catch (error) {
+      _showSnackBar(error.message);
+    } catch (error) {
+      _showSnackBar('获取模型失败：$error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isFetchingModels = false;
+        });
+      }
+    }
+  }
+
+  void _showSnackBar(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final List<String> models =
+        _appConfig.providerConfig(widget.provider).models;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.provider.label),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: <Widget>[
+          _SettingsSection(
+            title: 'API Key',
+            child: TextField(
+              controller: _apiKeyController,
+              decoration: const InputDecoration(
+                labelText: 'API Key',
+                filled: true,
+              ),
+              onChanged: _saveApiKey,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SettingsSection(
+            title: '模型列表',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                FilledButton.icon(
+                  onPressed: _isFetchingModels ? null : _fetchModels,
+                  icon: _isFetchingModels
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.cloud_download_rounded),
+                  label: const Text('获取'),
+                ),
+                const SizedBox(height: 12),
+                if (models.isEmpty)
+                  const Text('暂无模型')
+                else
+                  ...models.map(
+                    (String model) => ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(model),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class CharacterSettingsPage extends StatefulWidget {
+  const CharacterSettingsPage({
+    required this.characterRepository,
+    required this.settingsRepository,
+    super.key,
+  });
+
+  final CharacterRepository characterRepository;
+  final SettingsRepository settingsRepository;
+
+  @override
+  State<CharacterSettingsPage> createState() => _CharacterSettingsPageState();
+}
+
+class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
+  final TextEditingController _promptController = TextEditingController();
+
+  bool _isLoading = true;
   List<String> _characters = const <String>[];
   String _selectedCharacter = 'test';
   CharacterAssetConfig _assetConfig = const CharacterAssetConfig();
@@ -41,26 +306,30 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void dispose() {
     _promptController.dispose();
-    _apiKeyController.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
-    setState(() => _isLoading = true);
-    _characters = await widget.characterRepository.getCharacters();
-    _selectedCharacter = await widget.characterRepository.getSelectedCharacter();
-    _assetConfig = await widget.characterRepository.loadCharacterAssetConfig(
-      _selectedCharacter,
-    );
-    _runtimeConfig = await widget.characterRepository.loadCharacterRuntimeConfig(
-      _selectedCharacter,
-    );
-    _appConfig = await widget.settingsRepository.loadAppConfig();
-    _promptController.text = _assetConfig.prompt;
-    _apiKeyController.text =
-        _appConfig.providerConfig(_runtimeConfig.provider).apiKey;
+    final List<String> characters = await widget.characterRepository.getCharacters();
+    final String selectedCharacter =
+        await widget.characterRepository.getSelectedCharacter();
+    final CharacterAssetConfig assetConfig =
+        await widget.characterRepository.loadCharacterAssetConfig(selectedCharacter);
+    final CharacterRuntimeConfig runtimeConfig = await widget.characterRepository
+        .loadCharacterRuntimeConfig(selectedCharacter);
+    final AppConfig appConfig = await widget.settingsRepository.loadAppConfig();
+
+    _characters = characters;
+    _selectedCharacter = selectedCharacter;
+    _assetConfig = assetConfig;
+    _runtimeConfig = runtimeConfig;
+    _appConfig = appConfig;
+    _promptController.text = assetConfig.prompt;
+
     if (mounted) {
-      setState(() => _isLoading = false);
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
@@ -90,91 +359,35 @@ class _SettingsPageState extends State<SettingsPage> {
     await _load();
   }
 
-  Future<void> _changeProvider(LlmProviderType provider) async {
+  Future<void> _changeProvider(LlmProviderType? provider) async {
+    if (provider == null) {
+      return;
+    }
     setState(() {
       _runtimeConfig = _runtimeConfig.copyWith(
         serverSelect: provider.configKey,
         modelSelect: '',
       );
-      _apiKeyController.text = _appConfig.providerConfig(provider).apiKey;
     });
     await widget.characterRepository.saveCharacterProvider(
       _selectedCharacter,
       provider,
     );
     await widget.characterRepository.saveCharacterModel(_selectedCharacter, '');
-  }
-
-  Future<void> _saveApiKey(String value) async {
-    await widget.settingsRepository.saveProviderApiKey(
-      _runtimeConfig.provider,
-      value,
-    );
     _appConfig = await widget.settingsRepository.loadAppConfig();
-  }
-
-  Future<void> _fetchModels() async {
-    final String apiKey = _apiKeyController.text.trim();
-    if (apiKey.isEmpty) {
-      _showSnackBar('请先填写 API Key');
-      return;
-    }
-
-    setState(() => _isFetchingModels = true);
-    try {
-      final List<String> models = await widget.services[_runtimeConfig.provider]!
-          .fetchModels(apiKey);
-      await widget.settingsRepository.saveProviderApiKey(
-        _runtimeConfig.provider,
-        apiKey,
-      );
-      await widget.settingsRepository.saveProviderModels(
-        _runtimeConfig.provider,
-        models,
-      );
-      _appConfig = await widget.settingsRepository.loadAppConfig();
-
-      if (models.isNotEmpty) {
-        final String selectedModel =
-            models.contains(_runtimeConfig.modelSelect)
-                ? _runtimeConfig.modelSelect
-                : models.first;
-        _runtimeConfig = _runtimeConfig.copyWith(modelSelect: selectedModel);
-        await widget.characterRepository.saveCharacterModel(
-          _selectedCharacter,
-          selectedModel,
-        );
-      }
-      _showSnackBar(models.isEmpty ? '未获取到模型列表' : '模型列表已刷新');
+    if (mounted) {
       setState(() {});
-    } on LlmException catch (error) {
-      _showSnackBar(error.message);
-    } catch (error) {
-      _showSnackBar('获取模型失败：$error');
-    } finally {
-      if (mounted) {
-        setState(() => _isFetchingModels = false);
-      }
     }
   }
 
-  Future<void> _changeModel(String? value) async {
-    if (value == null) {
+  Future<void> _changeModel(String? model) async {
+    if (model == null) {
       return;
     }
     setState(() {
-      _runtimeConfig = _runtimeConfig.copyWith(modelSelect: value);
+      _runtimeConfig = _runtimeConfig.copyWith(modelSelect: model);
     });
-    await widget.characterRepository.saveCharacterModel(_selectedCharacter, value);
-  }
-
-  void _showSnackBar(String message) {
-    if (!mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    await widget.characterRepository.saveCharacterModel(_selectedCharacter, model);
   }
 
   @override
@@ -185,61 +398,62 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     }
 
-    final LlmProviderType provider = _runtimeConfig.provider;
-    final List<String> models = _appConfig.providerConfig(provider).models;
+    final List<String> modelList =
+        _appConfig.providerConfig(_runtimeConfig.provider).models;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('设置'),
+        title: const Text('角色设置'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
-          _SettingsCard(
-            title: '角色设置',
+          _SettingsSection(
+            title: '选中角色',
+            child: DropdownButtonFormField<String>(
+              key: ValueKey<String>('character_$_selectedCharacter'),
+              initialValue: _selectedCharacter,
+              decoration: const InputDecoration(
+                labelText: '当前角色',
+              ),
+              items: _characters
+                  .map(
+                    (String character) => DropdownMenuItem<String>(
+                      value: character,
+                      child: Text(character),
+                    ),
+                  )
+                  .toList(growable: false),
+              onChanged: _switchCharacter,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SettingsSection(
+            title: '角色提示词',
+            child: TextField(
+              controller: _promptController,
+              minLines: 4,
+              maxLines: 8,
+              decoration: const InputDecoration(
+                labelText: '提示词',
+                alignLabelWithHint: true,
+                filled: true,
+              ),
+              onChanged: _savePrompt,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SettingsSection(
+            title: '立绘设置',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                DropdownButtonFormField<String>(
-                  key: ValueKey<String>('character_$_selectedCharacter'),
-                  initialValue: _selectedCharacter,
-                  decoration: const InputDecoration(
-                    labelText: '当前角色',
-                  ),
-                  items: _characters
-                      .map(
-                        (String character) => DropdownMenuItem<String>(
-                          value: character,
-                          child: Text(character),
-                        ),
-                      )
-                      .toList(growable: false),
-                  onChanged: _switchCharacter,
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _promptController,
-                  minLines: 4,
-                  maxLines: 8,
-                  decoration: const InputDecoration(
-                    labelText: '角色提示词',
-                    alignLabelWithHint: true,
-                    filled: true,
-                  ),
-                  onChanged: _savePrompt,
-                ),
-                const SizedBox(height: 18),
-                Text(
-                  '立绘大小：${_runtimeConfig.tachieSize}%',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
+                Text('立绘大小：${_runtimeConfig.tachieSize}%'),
                 Slider(
                   min: 50,
                   max: 160,
                   divisions: 22,
-                  value: _runtimeConfig.tachieSize
-                      .toDouble()
-                      .clamp(50.0, 160.0),
+                  value: _runtimeConfig.tachieSize.toDouble().clamp(50.0, 160.0),
                   label: '${_runtimeConfig.tachieSize}%',
                   onChanged: (double value) {
                     setState(() {
@@ -261,60 +475,41 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 16),
-          _SettingsCard(
-            title: '模型设置',
+          _SettingsSection(
+            title: '运行配置',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Wrap(
-                  spacing: 8,
-                  children: LlmProviderType.values
+                DropdownButtonFormField<LlmProviderType>(
+                  key: ValueKey<String>('provider_${_runtimeConfig.serverSelect}'),
+                  initialValue: _runtimeConfig.provider,
+                  decoration: const InputDecoration(
+                    labelText: '对话模型服务商',
+                  ),
+                  items: LlmProviderType.values
                       .map(
-                        (LlmProviderType item) => ChoiceChip(
-                          label: Text(item.label),
-                          selected: provider == item,
-                          onSelected: (_) => _changeProvider(item),
+                        (LlmProviderType provider) =>
+                            DropdownMenuItem<LlmProviderType>(
+                          value: provider,
+                          child: Text(provider.label),
                         ),
                       )
                       .toList(growable: false),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _apiKeyController,
-                  decoration: const InputDecoration(
-                    labelText: 'API Key',
-                    filled: true,
-                  ),
-                  onChanged: _saveApiKey,
-                ),
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: _isFetchingModels ? null : _fetchModels,
-                  icon: _isFetchingModels
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.cloud_download_rounded),
-                  label: const Text('获取模型列表'),
+                  onChanged: _changeProvider,
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
                   key: ValueKey<String>(
-                    'model_${provider.configKey}_${_runtimeConfig.modelSelect}',
+                    'model_${_runtimeConfig.serverSelect}_${_runtimeConfig.modelSelect}',
                   ),
-                  initialValue: models.contains(_runtimeConfig.modelSelect) &&
+                  initialValue: modelList.contains(_runtimeConfig.modelSelect) &&
                           _runtimeConfig.modelSelect.isNotEmpty
                       ? _runtimeConfig.modelSelect
                       : null,
                   decoration: const InputDecoration(
                     labelText: '当前模型',
                   ),
-                  items: models
+                  items: modelList
                       .map(
                         (String model) => DropdownMenuItem<String>(
                           value: model,
@@ -322,7 +517,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       )
                       .toList(growable: false),
-                  onChanged: models.isEmpty ? null : _changeModel,
+                  onChanged: modelList.isEmpty ? null : _changeModel,
                 ),
               ],
             ),
@@ -333,8 +528,55 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-class _SettingsCard extends StatelessWidget {
-  const _SettingsCard({
+class VitsSettingsPlaceholderPage extends StatelessWidget {
+  const VitsSettingsPlaceholderPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('语言合成'),
+      ),
+      body: const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            '这个分区保留了与 Qt 一致的结构。\n当前安卓端首版还没有移植 VITS 配置与合成功能。',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsEntry extends StatelessWidget {
+  const _SettingsEntry({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(title),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: onTap,
+    );
+  }
+}
+
+class _SettingsSection extends StatelessWidget {
+  const _SettingsSection({
     required this.title,
     required this.child,
   });
@@ -344,35 +586,16 @@ class _SettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFFBF7),
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: const <BoxShadow>[
-          BoxShadow(
-            color: Color(0x12000000),
-            blurRadius: 16,
-            offset: Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: const Color(0xFF7C2D12),
-                  ),
-            ),
-            const SizedBox(height: 16),
-            child,
-          ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleMedium,
         ),
-      ),
+        const SizedBox(height: 12),
+        child,
+      ],
     );
   }
 }
