@@ -1,3 +1,2 @@
-# zcchat2_for_android
-
-A new Flutter project.
+# ZcChat2ForMobile
+About 一个模仿 Galgame 演出效果的AI桌宠——移动端版本
