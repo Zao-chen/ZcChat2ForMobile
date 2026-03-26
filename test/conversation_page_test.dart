@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -53,9 +53,7 @@ void main() {
       final AppStoragePaths paths = AppStoragePaths(tempDir);
       await AppBootstrap.ensureInitialized(storagePaths: paths);
 
-      final CharacterRepository characterRepository = CharacterRepository(
-        paths,
-      );
+      final CharacterRepository characterRepository = CharacterRepository(paths);
       final SettingsRepository settingsRepository = SettingsRepository(paths);
       final ConversationRepository conversationRepository =
           ConversationRepository(paths, characterRepository);

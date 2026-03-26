@@ -1,4 +1,4 @@
-name: zcchat2_for_mobile
+﻿name: zcchat2_for_mobile
 description: "A new Flutter project."
 publish_to: 'none'
 version: 0.1.0+1
@@ -7,6 +7,8 @@ environment:
   sdk: ^3.11.0
 
 dependencies:
+  archive: ^4.0.9
+  file_picker: ^10.3.10
   flutter:
     sdk: flutter
   http: ^1.5.0

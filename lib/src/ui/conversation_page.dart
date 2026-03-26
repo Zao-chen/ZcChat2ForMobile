@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 
 import 'package:flutter/material.dart';
 
@@ -133,7 +133,6 @@ class _ConversationPageState extends State<ConversationPage> {
   void _showHistorySheet() {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFFFFFBF6),
       showDragHandle: true,
       isScrollControlled: true,
       builder: (BuildContext context) {
@@ -157,7 +156,7 @@ class _ConversationPageState extends State<ConversationPage> {
               final HistoryEntry entry = entries[index];
               final bool isUser = entry.speaker == HistorySpeaker.user;
               final String speakerName = switch (entry.speaker) {
-                HistorySpeaker.user => '你',
+                HistorySpeaker.user => '用户',
                 HistorySpeaker.role => widget.controller.selectedCharacter,
                 HistorySpeaker.system => '记录',
               };
@@ -171,14 +170,7 @@ class _ConversationPageState extends State<ConversationPage> {
                       color: isUser
                           ? const Color(0xFFF4C7A1)
                           : const Color(0xFFFFFFFF),
-                      borderRadius: BorderRadius.circular(22),
-                      boxShadow: const <BoxShadow>[
-                        BoxShadow(
-                          color: Color(0x14000000),
-                          blurRadius: 14,
-                          offset: Offset(0, 6),
-                        ),
-                      ],
+                      borderRadius: BorderRadius.circular(16),
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(16),
@@ -311,13 +303,6 @@ class _DialogPanel extends StatelessWidget {
         color: const Color(0xF7FFFDF9),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0x1F7C2D12)),
-        boxShadow: const <BoxShadow>[
-          BoxShadow(
-            color: Color(0x18000000),
-            blurRadius: 20,
-            offset: Offset(0, 8),
-          ),
-        ],
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
@@ -432,7 +417,7 @@ class _TachiePlaceholder extends StatelessWidget {
       height: 360,
       decoration: BoxDecoration(
         color: const Color(0x26FFFFFF),
-        borderRadius: BorderRadius.circular(36),
+        borderRadius: BorderRadius.circular(24),
         border: Border.all(color: const Color(0x33FFFFFF)),
       ),
       child: const Icon(

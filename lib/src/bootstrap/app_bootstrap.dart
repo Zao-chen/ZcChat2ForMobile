@@ -1,7 +1,8 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/app_models.dart';
@@ -13,11 +14,21 @@ class AppBootstrap {
 
   static Future<AppStoragePaths> ensureInitialized({
     AppStoragePaths? storagePaths,
+    AppStoragePaths? legacyStoragePaths,
     AssetBundle? assetBundle,
   }) async {
     final AssetBundle resolvedAssetBundle = assetBundle ?? rootBundle;
-    final AppStoragePaths paths = storagePaths ??
-        AppStoragePaths(await getApplicationDocumentsDirectory());
+    final AppStoragePaths paths =
+        storagePaths ?? await _resolveDefaultStoragePaths();
+    final AppStoragePaths? legacyPaths =
+        legacyStoragePaths ?? await _resolveLegacyStoragePaths(paths);
+
+    if (legacyPaths != null) {
+      await _migrateLegacyStorage(
+        source: legacyPaths,
+        target: paths,
+      );
+    }
 
     await paths.rootDirectory.create(recursive: true);
     await paths.characterAssetsDirectory.create(recursive: true);
@@ -70,6 +81,75 @@ class AppBootstrap {
     );
 
     return paths;
+  }
+
+  static Future<AppStoragePaths> _resolveDefaultStoragePaths() async {
+    if (Platform.isAndroid) {
+      final Directory? downloadsDirectory = await getDownloadsDirectory();
+      if (downloadsDirectory != null) {
+        return AppStoragePaths(downloadsDirectory);
+      }
+    }
+
+    return AppStoragePaths(await getApplicationDocumentsDirectory());
+  }
+
+  static Future<AppStoragePaths?> _resolveLegacyStoragePaths(
+    AppStoragePaths currentPaths,
+  ) async {
+    if (!Platform.isAndroid) {
+      return null;
+    }
+
+    final AppStoragePaths legacyPaths =
+        AppStoragePaths(await getApplicationDocumentsDirectory());
+    if (p.equals(legacyPaths.rootDirectory.path, currentPaths.rootDirectory.path)) {
+      return null;
+    }
+    return legacyPaths;
+  }
+
+  static Future<void> _migrateLegacyStorage({
+    required AppStoragePaths source,
+    required AppStoragePaths target,
+  }) async {
+    if (!await source.rootDirectory.exists()) {
+      return;
+    }
+
+    if (p.equals(source.rootDirectory.path, target.rootDirectory.path)) {
+      return;
+    }
+
+    await _copyDirectoryContents(
+      source.rootDirectory,
+      target.rootDirectory,
+    );
+  }
+
+  static Future<void> _copyDirectoryContents(
+    Directory source,
+    Directory target,
+  ) async {
+    await target.create(recursive: true);
+
+    await for (final FileSystemEntity entity in source.list(recursive: false)) {
+      final String name = p.basename(entity.path);
+      final String targetPath = p.join(target.path, name);
+
+      if (entity is Directory) {
+        await _copyDirectoryContents(entity, Directory(targetPath));
+        continue;
+      }
+
+      if (entity is File) {
+        final File targetFile = File(targetPath);
+        if (!await targetFile.exists()) {
+          await targetFile.parent.create(recursive: true);
+          await entity.copy(targetFile.path);
+        }
+      }
+    }
   }
 
   static Future<void> _copyDefaultTachie({

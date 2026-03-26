@@ -1,4 +1,4 @@
-class ModelProviderConfig {
+﻿class ModelProviderConfig {
   const ModelProviderConfig({
     this.apiKey = '',
     this.models = const <String>[],

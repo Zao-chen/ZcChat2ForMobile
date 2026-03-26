@@ -1,3 +1,7 @@
+﻿import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../models/app_models.dart';
@@ -41,7 +45,7 @@ class SettingsPage extends StatelessWidget {
           ),
           _SettingsEntry(
             title: '语言合成',
-            subtitle: '保持与 Qt 结构一致，功能暂未移植',
+            subtitle: '保留和 Qt 一致的结构，功能暂未移植',
             icon: Icons.record_voice_over_outlined,
             onTap: () {
               Navigator.of(context).push(
@@ -133,6 +137,7 @@ class ProviderSettingsPage extends StatefulWidget {
 
 class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
   final TextEditingController _apiKeyController = TextEditingController();
+
   bool _isLoading = true;
   bool _isFetchingModels = false;
   AppConfig _appConfig = AppConfig.initial();
@@ -212,8 +217,7 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
       );
     }
 
-    final List<String> models =
-        _appConfig.providerConfig(widget.provider).models;
+    final List<String> models = _appConfig.providerConfig(widget.provider).models;
 
     return Scaffold(
       appBar: AppBar(
@@ -291,6 +295,7 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
   final TextEditingController _promptController = TextEditingController();
 
   bool _isLoading = true;
+  bool _isImporting = false;
   List<String> _characters = const <String>[];
   String _selectedCharacter = 'test';
   CharacterAssetConfig _assetConfig = const CharacterAssetConfig();
@@ -315,8 +320,8 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
         await widget.characterRepository.getSelectedCharacter();
     final CharacterAssetConfig assetConfig =
         await widget.characterRepository.loadCharacterAssetConfig(selectedCharacter);
-    final CharacterRuntimeConfig runtimeConfig = await widget.characterRepository
-        .loadCharacterRuntimeConfig(selectedCharacter);
+    final CharacterRuntimeConfig runtimeConfig =
+        await widget.characterRepository.loadCharacterRuntimeConfig(selectedCharacter);
     final AppConfig appConfig = await widget.settingsRepository.loadAppConfig();
 
     _characters = characters;
@@ -339,6 +344,51 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
     }
     await widget.characterRepository.selectCharacter(value);
     await _load();
+  }
+
+  Future<void> _importCharacter() async {
+    final FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const <String>['zip'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) {
+      return;
+    }
+
+    final PlatformFile pickedFile = result.files.single;
+    Uint8List? bytes = pickedFile.bytes;
+    if (bytes == null && pickedFile.path != null) {
+      bytes = await File(pickedFile.path!).readAsBytes();
+    }
+    if (bytes == null) {
+      _showSnackBar('无法读取压缩包内容');
+      return;
+    }
+
+    setState(() {
+      _isImporting = true;
+    });
+
+    try {
+      final String characterName = await widget.characterRepository
+          .importCharacterArchive(
+        bytes,
+        archiveName: pickedFile.name,
+      );
+      await _load();
+      _showSnackBar('角色 $characterName 已导入');
+    } on CharacterImportException catch (error) {
+      _showSnackBar(error.message);
+    } catch (error) {
+      _showSnackBar('导入失败：$error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isImporting = false;
+        });
+      }
+    }
   }
 
   Future<void> _savePrompt(String value) async {
@@ -390,6 +440,15 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
     await widget.characterRepository.saveCharacterModel(_selectedCharacter, model);
   }
 
+  void _showSnackBar(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -410,21 +469,41 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
         children: <Widget>[
           _SettingsSection(
             title: '选中角色',
-            child: DropdownButtonFormField<String>(
-              key: ValueKey<String>('character_$_selectedCharacter'),
-              initialValue: _selectedCharacter,
-              decoration: const InputDecoration(
-                labelText: '当前角色',
-              ),
-              items: _characters
-                  .map(
-                    (String character) => DropdownMenuItem<String>(
-                      value: character,
-                      child: Text(character),
-                    ),
-                  )
-                  .toList(growable: false),
-              onChanged: _switchCharacter,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                DropdownButtonFormField<String>(
+                  key: ValueKey<String>('character_$_selectedCharacter'),
+                  initialValue: _selectedCharacter,
+                  decoration: const InputDecoration(
+                    labelText: '当前角色',
+                  ),
+                  items: _characters
+                      .map(
+                        (String character) => DropdownMenuItem<String>(
+                          value: character,
+                          child: Text(character),
+                        ),
+                      )
+                      .toList(growable: false),
+                  onChanged: _switchCharacter,
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: _isImporting ? null : _importCharacter,
+                  icon: _isImporting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.download_rounded),
+                  label: Text(_isImporting ? '导入中' : '导入'),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 16),
@@ -541,7 +620,7 @@ class VitsSettingsPlaceholderPage extends StatelessWidget {
         child: Padding(
           padding: EdgeInsets.all(24),
           child: Text(
-            '这个分区保留了与 Qt 一致的结构。\n当前安卓端首版还没有移植 VITS 配置与合成功能。',
+            '这个分区保留了和 Qt 一致的结构。当前安卓首版还没有移植 VITS 配置与合成功能。',
             textAlign: TextAlign.center,
           ),
         ),
