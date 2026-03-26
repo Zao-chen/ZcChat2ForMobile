@@ -1,4 +1,5 @@
 ﻿import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -170,7 +171,7 @@ class _ConversationPageState extends State<ConversationPage> {
                       color: isUser
                           ? const Color(0xFFF4C7A1)
                           : const Color(0xFFFFFFFF),
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(16),
@@ -202,55 +203,76 @@ class _ConversationPageState extends State<ConversationPage> {
   @override
   Widget build(BuildContext context) {
     final ConversationController controller = widget.controller;
+    final double keyboardInset = MediaQuery.of(context).viewInsets.bottom;
+    final double dialogBottom = math.max(16, keyboardInset + 12);
+    const double dialogReservedHeight = 176;
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       body: SafeArea(
         child: controller.isLoading
             ? const Center(child: CircularProgressIndicator())
-            : Column(
+            : Stack(
                 children: <Widget>[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
-                    child: Row(
+                  Positioned.fill(
+                    child: Column(
                       children: <Widget>[
-                        const Spacer(),
-                        IconButton(
-                          onPressed: _showHistorySheet,
-                          icon: const Icon(Icons.history_rounded),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
+                          child: Row(
+                            children: <Widget>[
+                              const Spacer(),
+                              IconButton(
+                                onPressed: _showHistorySheet,
+                                icon: const Icon(Icons.history_rounded),
+                              ),
+                              IconButton(
+                                onPressed: _openSettings,
+                                icon: const Icon(Icons.settings_rounded),
+                              ),
+                            ],
+                          ),
                         ),
-                        IconButton(
-                          onPressed: _openSettings,
-                          icon: const Icon(Icons.settings_rounded),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(
+                              left: 12,
+                              right: 12,
+                              bottom: dialogReservedHeight,
+                            ),
+                            child: Center(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.translucent,
+                                onScaleStart: _handleTachieScaleStart,
+                                onScaleUpdate: _handleTachieScaleUpdate,
+                                onScaleEnd: _handleTachieScaleEnd,
+                                onDoubleTap: _resetTachieTransform,
+                                child: Transform.translate(
+                                  offset: _tachieOffset,
+                                  child: AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 250),
+                                    child: _TachieDisplay(
+                                      key: ValueKey<String?>(
+                                        controller.currentTachieFile?.path,
+                                      ),
+                                      file: controller.currentTachieFile,
+                                      scale: _tachieScale,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  Expanded(
-                    child: Center(
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onScaleStart: _handleTachieScaleStart,
-                        onScaleUpdate: _handleTachieScaleUpdate,
-                        onScaleEnd: _handleTachieScaleEnd,
-                        onDoubleTap: _resetTachieTransform,
-                        child: Transform.translate(
-                          offset: _tachieOffset,
-                          child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 250),
-                            child: _TachieDisplay(
-                              key: ValueKey<String?>(
-                                controller.currentTachieFile?.path,
-                              ),
-                              file: controller.currentTachieFile,
-                              scale: _tachieScale,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    left: 14,
+                    right: 14,
+                    bottom: dialogBottom,
                     child: _DialogPanel(
                       characterName: controller.selectedCharacter,
                       inputController: _inputController,
@@ -293,19 +315,19 @@ class _DialogPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool readOnly = isSending || showContinueButton;
     final String hintText = showContinueButton
-        ? '点击文本框继续'
+        ? '点击继续'
         : isSending
             ? ''
             : '说点什么吧';
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xF7FFFDF9),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x1F7C2D12)),
+        color: const Color(0xD9FFF8F1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0x22000000)),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -313,12 +335,12 @@ class _DialogPanel extends StatelessWidget {
             Text(
               characterName,
               style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-                color: Color(0xFF7C2D12),
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFF2F241E),
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
             Stack(
               children: <Widget>[
                 TextField(
@@ -332,22 +354,24 @@ class _DialogPanel extends StatelessWidget {
                   onSubmitted: (_) => onSubmitted(),
                   decoration: InputDecoration(
                     hintText: hintText,
-                    filled: true,
-                    fillColor: const Color(0xFFF9F1E7),
-                    border: const OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(10)),
-                      borderSide: BorderSide.none,
+                    hintStyle: const TextStyle(
+                      color: Color(0x8A2F241E),
                     ),
-                    contentPadding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    isCollapsed: true,
+                    contentPadding: const EdgeInsets.fromLTRB(0, 4, 28, 18),
                   ),
                   style: const TextStyle(
-                    height: 1.5,
-                    color: Color(0xFF3A1F13),
+                    fontSize: 15,
+                    height: 1.55,
+                    color: Color(0xFF2F241E),
                   ),
                 ),
                 Positioned(
-                  right: 14,
-                  bottom: 12,
+                  right: 0,
+                  bottom: 0,
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 180),
                     child: isSending
@@ -362,8 +386,8 @@ class _DialogPanel extends StatelessWidget {
                                 ? Icons.touch_app_rounded
                                 : Icons.keyboard_return_rounded,
                             key: ValueKey<bool>(showContinueButton),
-                            size: 20,
-                            color: const Color(0xFF8E7A6A),
+                            size: 18,
+                            color: const Color(0xFF7C6A5C),
                           ),
                   ),
                 ),
@@ -417,7 +441,7 @@ class _TachiePlaceholder extends StatelessWidget {
       height: 360,
       decoration: BoxDecoration(
         color: const Color(0x26FFFFFF),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0x33FFFFFF)),
       ),
       child: const Icon(
@@ -428,3 +452,4 @@ class _TachiePlaceholder extends StatelessWidget {
     );
   }
 }
+
