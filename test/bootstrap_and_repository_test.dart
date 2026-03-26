@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zcchat2_for_mobile/src/bootstrap/app_bootstrap.dart';
+import 'package:zcchat2_for_mobile/src/models/app_models.dart';
 import 'package:zcchat2_for_mobile/src/repositories/app_repositories.dart';
 import 'package:zcchat2_for_mobile/src/repositories/app_storage_paths.dart';
 
@@ -105,6 +106,40 @@ void main() {
       jsonDecode(await publicPaths.characterAssetConfigFile('legacy').readAsString())['prompt'],
       '旧角色提示词',
     );
+  });
+
+  test('repositories save vits app config and character runtime config', () async {
+    final Directory tempDir = await Directory.systemTemp.createTemp(
+      'zcchat2_vits_repo_test_',
+    );
+    addTearDown(() => tempDir.delete(recursive: true));
+
+    final AppStoragePaths paths = AppStoragePaths(tempDir);
+    await AppBootstrap.ensureInitialized(storagePaths: paths);
+
+    final SettingsRepository settingsRepository = SettingsRepository(paths);
+    final CharacterRepository characterRepository = CharacterRepository(paths);
+
+    await settingsRepository.saveVitsApiUrl('http://127.0.0.1:23456');
+    await settingsRepository.saveVitsModelAndSpeakers(
+      const <String>['gpt-sovits - 0 - test'],
+    );
+    await settingsRepository.saveVitsSentenceSplit(false);
+    await characterRepository.saveCharacterVitsEnabled('test', true);
+    await characterRepository.saveCharacterVitsModelAndSpeaker(
+      'test',
+      'gpt-sovits - 0 - test',
+    );
+
+    final AppConfig appConfig = await settingsRepository.loadAppConfig();
+    final CharacterRuntimeConfig runtimeConfig =
+        await characterRepository.loadCharacterRuntimeConfig('test');
+
+    expect(appConfig.vits.apiUrl, 'http://127.0.0.1:23456');
+    expect(appConfig.vits.modelAndSpeakers, <String>['gpt-sovits - 0 - test']);
+    expect(appConfig.vits.sentenceSplit, isFalse);
+    expect(runtimeConfig.vitsEnable, isTrue);
+    expect(runtimeConfig.vitsMasSelect, 'gpt-sovits - 0 - test');
   });
 
   test('conversation repository builds context message from saved history', () async {

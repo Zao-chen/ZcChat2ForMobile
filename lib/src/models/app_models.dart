@@ -37,6 +37,59 @@
   }
 }
 
+class VitsConfig {
+  const VitsConfig({
+    this.apiUrl = '',
+    this.modelAndSpeakers = const <String>[],
+    this.sentenceSplit = true,
+  });
+
+  final String apiUrl;
+  final List<String> modelAndSpeakers;
+  final bool sentenceSplit;
+
+  VitsConfig copyWith({
+    String? apiUrl,
+    List<String>? modelAndSpeakers,
+    bool? sentenceSplit,
+  }) {
+    return VitsConfig(
+      apiUrl: apiUrl ?? this.apiUrl,
+      modelAndSpeakers: modelAndSpeakers ?? this.modelAndSpeakers,
+      sentenceSplit: sentenceSplit ?? this.sentenceSplit,
+    );
+  }
+
+  factory VitsConfig.fromJson(Map<String, dynamic> json) {
+    final Object? rawModels = json['ModelAndSpeakerList'];
+    final List<String> modelAndSpeakers = rawModels is List
+        ? rawModels.whereType<String>().toList(growable: false)
+        : const <String>[];
+
+    final Object? rawSentenceSplit = json['SentenceSplit'];
+    final bool sentenceSplit = switch (rawSentenceSplit) {
+      bool value => value,
+      String value => value.toLowerCase() == 'true',
+      int value => value != 0,
+      _ => true,
+    };
+
+    return VitsConfig(
+      apiUrl: (json['ApiUrl'] as String?)?.trim() ?? '',
+      modelAndSpeakers: modelAndSpeakers,
+      sentenceSplit: sentenceSplit,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'ApiUrl': apiUrl,
+      'ModelAndSpeakerList': modelAndSpeakers,
+      'SentenceSplit': sentenceSplit,
+    };
+  }
+}
+
 enum LlmProviderType {
   openAI,
   deepSeek;
@@ -82,9 +135,11 @@ enum LlmProviderType {
 class AppConfig {
   const AppConfig({
     required this.providers,
+    required this.vits,
   });
 
   final Map<LlmProviderType, ModelProviderConfig> providers;
+  final VitsConfig vits;
 
   factory AppConfig.initial() {
     return AppConfig(
@@ -92,6 +147,7 @@ class AppConfig {
         LlmProviderType.openAI: const ModelProviderConfig(),
         LlmProviderType.deepSeek: const ModelProviderConfig(),
       },
+      vits: const VitsConfig(),
     );
   }
 
@@ -110,7 +166,14 @@ class AppConfig {
       providers[provider] = ModelProviderConfig.fromJson(providerMap);
     }
 
-    return AppConfig(providers: providers);
+    final Map<String, dynamic> vitsMap =
+        (json['vits'] as Map?)?.cast<String, dynamic>() ??
+            const <String, dynamic>{};
+
+    return AppConfig(
+      providers: providers,
+      vits: VitsConfig.fromJson(vitsMap),
+    );
   }
 
   ModelProviderConfig providerConfig(LlmProviderType provider) {
@@ -126,6 +189,14 @@ class AppConfig {
         ...providers,
         provider: config,
       },
+      vits: vits,
+    );
+  }
+
+  AppConfig copyWithVits(VitsConfig config) {
+    return AppConfig(
+      providers: providers,
+      vits: config,
     );
   }
 
@@ -135,7 +206,10 @@ class AppConfig {
       llmMap[provider.configKey] = providerConfig(provider).toJson();
     }
 
-    return <String, dynamic>{'llm': llmMap};
+    return <String, dynamic>{
+      'llm': llmMap,
+      'vits': vits.toJson(),
+    };
   }
 }
 
@@ -170,6 +244,8 @@ class CharacterRuntimeConfig {
     this.tachieOffsetY = 0,
     this.serverSelect = 'DeepSeek',
     this.modelSelect = '',
+    this.vitsEnable = false,
+    this.vitsMasSelect = '',
   });
 
   final int tachieSize;
@@ -177,6 +253,8 @@ class CharacterRuntimeConfig {
   final double tachieOffsetY;
   final String serverSelect;
   final String modelSelect;
+  final bool vitsEnable;
+  final String vitsMasSelect;
 
   LlmProviderType get provider => LlmProviderType.fromConfigKey(serverSelect);
 
@@ -186,6 +264,8 @@ class CharacterRuntimeConfig {
     double? tachieOffsetY,
     String? serverSelect,
     String? modelSelect,
+    bool? vitsEnable,
+    String? vitsMasSelect,
   }) {
     return CharacterRuntimeConfig(
       tachieSize: tachieSize ?? this.tachieSize,
@@ -193,6 +273,8 @@ class CharacterRuntimeConfig {
       tachieOffsetY: tachieOffsetY ?? this.tachieOffsetY,
       serverSelect: serverSelect ?? this.serverSelect,
       modelSelect: modelSelect ?? this.modelSelect,
+      vitsEnable: vitsEnable ?? this.vitsEnable,
+      vitsMasSelect: vitsMasSelect ?? this.vitsMasSelect,
     );
   }
 
@@ -205,6 +287,7 @@ class CharacterRuntimeConfig {
     };
     final Object? rawOffsetX = json['tachieOffsetX'];
     final Object? rawOffsetY = json['tachieOffsetY'];
+    final Object? rawVitsEnable = json['vitsEnable'];
 
     return CharacterRuntimeConfig(
       tachieSize: tachieSize,
@@ -222,6 +305,13 @@ class CharacterRuntimeConfig {
           ? (json['serverSelect'] as String)
           : 'DeepSeek',
       modelSelect: (json['modelSelect'] as String?) ?? '',
+      vitsEnable: switch (rawVitsEnable) {
+        bool value => value,
+        String value => value.toLowerCase() == 'true',
+        int value => value != 0,
+        _ => false,
+      },
+      vitsMasSelect: (json['vitsMasSelect'] as String?) ?? '',
     );
   }
 
@@ -232,6 +322,8 @@ class CharacterRuntimeConfig {
       'tachieOffsetY': tachieOffsetY,
       'serverSelect': serverSelect,
       'modelSelect': modelSelect,
+      'vitsEnable': vitsEnable,
+      'vitsMasSelect': vitsMasSelect,
     };
   }
 }

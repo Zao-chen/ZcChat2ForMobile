@@ -7,18 +7,21 @@ import 'package:flutter/material.dart';
 import '../models/app_models.dart';
 import '../repositories/app_repositories.dart';
 import '../services/llm_service.dart';
+import '../services/vits_service.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({
     required this.characterRepository,
     required this.settingsRepository,
     required this.services,
+    required this.vitsService,
     super.key,
   });
 
   final CharacterRepository characterRepository;
   final SettingsRepository settingsRepository;
   final Map<LlmProviderType, LlmService> services;
+  final VitsService vitsService;
 
   @override
   Widget build(BuildContext context) {
@@ -45,12 +48,15 @@ class SettingsPage extends StatelessWidget {
           ),
           _SettingsEntry(
             title: '语言合成',
-            subtitle: '保留和 Qt 一致的结构，功能暂未移植',
+            subtitle: 'vits-simple-api',
             icon: Icons.record_voice_over_outlined,
             onTap: () {
               Navigator.of(context).push(
                 MaterialPageRoute<void>(
-                  builder: (_) => const VitsSettingsPlaceholderPage(),
+                  builder: (_) => VitsSettingsHomePage(
+                    settingsRepository: settingsRepository,
+                    vitsService: vitsService,
+                  ),
                 ),
               );
             },
@@ -277,6 +283,226 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
   }
 }
 
+class VitsSettingsHomePage extends StatelessWidget {
+  const VitsSettingsHomePage({
+    required this.settingsRepository,
+    required this.vitsService,
+    super.key,
+  });
+
+  final SettingsRepository settingsRepository;
+  final VitsService vitsService;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('语言合成'),
+      ),
+      body: ListView(
+        children: <Widget>[
+          _SettingsEntry(
+            title: 'vits-simple-api',
+            subtitle: 'API 地址、角色列表、句切分',
+            icon: Icons.graphic_eq_rounded,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => VitsSimpleApiSettingsPage(
+                    settingsRepository: settingsRepository,
+                    vitsService: vitsService,
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class VitsSimpleApiSettingsPage extends StatefulWidget {
+  const VitsSimpleApiSettingsPage({
+    required this.settingsRepository,
+    required this.vitsService,
+    super.key,
+  });
+
+  final SettingsRepository settingsRepository;
+  final VitsService vitsService;
+
+  @override
+  State<VitsSimpleApiSettingsPage> createState() =>
+      _VitsSimpleApiSettingsPageState();
+}
+
+class _VitsSimpleApiSettingsPageState extends State<VitsSimpleApiSettingsPage> {
+  final TextEditingController _apiUrlController = TextEditingController();
+
+  bool _isLoading = true;
+  bool _isFetchingSpeakers = false;
+  AppConfig _appConfig = AppConfig.initial();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _apiUrlController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final AppConfig config = await widget.settingsRepository.loadAppConfig();
+    _appConfig = config;
+    _apiUrlController.text = config.vits.apiUrl;
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _saveApiUrl(String value) async {
+    await widget.settingsRepository.saveVitsApiUrl(value);
+    _appConfig = await widget.settingsRepository.loadAppConfig();
+  }
+
+  Future<void> _toggleSentenceSplit(bool enabled) async {
+    setState(() {
+      _appConfig = _appConfig.copyWithVits(
+        _appConfig.vits.copyWith(sentenceSplit: enabled),
+      );
+    });
+    await widget.settingsRepository.saveVitsSentenceSplit(enabled);
+  }
+
+  Future<void> _fetchModelAndSpeakers() async {
+    final String apiUrl = _apiUrlController.text.trim();
+    if (apiUrl.isEmpty) {
+      _showSnackBar('请先填写 API 地址');
+      return;
+    }
+
+    setState(() {
+      _isFetchingSpeakers = true;
+    });
+
+    try {
+      final List<String> modelAndSpeakers =
+          await widget.vitsService.fetchModelAndSpeakers(apiUrl);
+      await widget.settingsRepository.saveVitsApiUrl(apiUrl);
+      await widget.settingsRepository
+          .saveVitsModelAndSpeakers(modelAndSpeakers);
+      _appConfig = await widget.settingsRepository.loadAppConfig();
+      _showSnackBar(
+        modelAndSpeakers.isEmpty ? '未获取到角色列表' : '角色列表已刷新',
+      );
+    } on VitsException catch (error) {
+      _showSnackBar(error.message);
+    } catch (error) {
+      _showSnackBar('获取角色列表失败：$error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isFetchingSpeakers = false;
+        });
+      }
+    }
+  }
+
+  void _showSnackBar(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final List<String> modelAndSpeakers = _appConfig.vits.modelAndSpeakers;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('vits-simple-api'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: <Widget>[
+          _SettingsSection(
+            title: 'API 地址',
+            child: TextField(
+              controller: _apiUrlController,
+              decoration: const InputDecoration(
+                labelText: 'API Url',
+                filled: true,
+              ),
+              onChanged: _saveApiUrl,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SettingsSection(
+            title: '句切分',
+            child: SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              value: _appConfig.vits.sentenceSplit,
+              title: const Text('切分生成语音'),
+              subtitle: const Text('对话时按日语句子分段请求并播放'),
+              onChanged: _toggleSentenceSplit,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SettingsSection(
+            title: '模型和说话人',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                FilledButton.icon(
+                  onPressed: _isFetchingSpeakers ? null : _fetchModelAndSpeakers,
+                  icon: _isFetchingSpeakers
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.cloud_download_rounded),
+                  label: const Text('获取'),
+                ),
+                const SizedBox(height: 12),
+                if (modelAndSpeakers.isEmpty)
+                  const Text('暂无角色列表')
+                else
+                  ...modelAndSpeakers.map(
+                    (String item) => ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(item),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class CharacterSettingsPage extends StatefulWidget {
   const CharacterSettingsPage({
     required this.characterRepository,
@@ -440,6 +666,29 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
     await widget.characterRepository.saveCharacterModel(_selectedCharacter, model);
   }
 
+  Future<void> _changeVitsEnabled(bool enabled) async {
+    setState(() {
+      _runtimeConfig = _runtimeConfig.copyWith(vitsEnable: enabled);
+    });
+    await widget.characterRepository.saveCharacterVitsEnabled(
+      _selectedCharacter,
+      enabled,
+    );
+  }
+
+  Future<void> _changeVitsModelAndSpeaker(String? value) async {
+    if (value == null) {
+      return;
+    }
+    setState(() {
+      _runtimeConfig = _runtimeConfig.copyWith(vitsMasSelect: value);
+    });
+    await widget.characterRepository.saveCharacterVitsModelAndSpeaker(
+      _selectedCharacter,
+      value,
+    );
+  }
+
   void _showSnackBar(String message) {
     if (!mounted) {
       return;
@@ -459,6 +708,12 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
 
     final List<String> modelList =
         _appConfig.providerConfig(_runtimeConfig.provider).models;
+    final List<String> vitsList = _appConfig.vits.modelAndSpeakers;
+    final String? selectedVitsItem =
+        vitsList.contains(_runtimeConfig.vitsMasSelect) &&
+                _runtimeConfig.vitsMasSelect.isNotEmpty
+            ? _runtimeConfig.vitsMasSelect
+            : null;
 
     return Scaffold(
       appBar: AppBar(
@@ -555,7 +810,7 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
           ),
           const SizedBox(height: 16),
           _SettingsSection(
-            title: '运行配置',
+            title: '对话模型',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -601,29 +856,49 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class VitsSettingsPlaceholderPage extends StatelessWidget {
-  const VitsSettingsPlaceholderPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('语言合成'),
-      ),
-      body: const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            '这个分区保留了和 Qt 一致的结构。当前安卓首版还没有移植 VITS 配置与合成功能。',
-            textAlign: TextAlign.center,
+          const SizedBox(height: 16),
+          _SettingsSection(
+            title: '语音合成',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  value: _runtimeConfig.vitsEnable,
+                  title: const Text('启用 VITS'),
+                  subtitle: const Text('播放角色回复中的日语语音'),
+                  onChanged: _changeVitsEnabled,
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  key: ValueKey<String>(
+                    'vits_${_runtimeConfig.vitsEnable}_${_runtimeConfig.vitsMasSelect}',
+                  ),
+                  initialValue: selectedVitsItem,
+                  decoration: const InputDecoration(
+                    labelText: '角色语音',
+                  ),
+                  items: vitsList
+                      .map(
+                        (String item) => DropdownMenuItem<String>(
+                          value: item,
+                          child: Text(item),
+                        ),
+                      )
+                      .toList(growable: false),
+                  onChanged: !_runtimeConfig.vitsEnable || vitsList.isEmpty
+                      ? null
+                      : _changeVitsModelAndSpeaker,
+                ),
+                if (vitsList.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Text('先到“语言合成 > vits-simple-api”获取角色列表'),
+                  ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

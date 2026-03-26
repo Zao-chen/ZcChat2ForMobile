@@ -1,4 +1,5 @@
-﻿import 'dart:io';
+﻿import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/painting.dart';
 import '../models/app_models.dart';
 import '../repositories/app_repositories.dart';
 import '../services/llm_service.dart';
+import '../services/vits_service.dart';
 
 class ConversationController extends ChangeNotifier {
   ConversationController({
@@ -13,12 +15,14 @@ class ConversationController extends ChangeNotifier {
     required this.settingsRepository,
     required this.conversationRepository,
     required this.services,
+    required this.vitsPlayback,
   });
 
   final CharacterRepository characterRepository;
   final SettingsRepository settingsRepository;
   final ConversationRepository conversationRepository;
   final Map<LlmProviderType, LlmService> services;
+  final VitsPlayback vitsPlayback;
 
   bool isLoading = true;
   bool isSending = false;
@@ -32,6 +36,7 @@ class ConversationController extends ChangeNotifier {
   String currentDisplayText = '';
   File? currentTachieFile;
   String _rawReply = '';
+  int _streamSynthCursor = 0;
 
   Future<void> initialize() async {
     await reload();
@@ -41,6 +46,7 @@ class ConversationController extends ChangeNotifier {
     isLoading = true;
     notifyListeners();
 
+    await vitsPlayback.stop();
     selectedCharacter = await characterRepository.getSelectedCharacter();
     characterAssetConfig =
         await characterRepository.loadCharacterAssetConfig(selectedCharacter);
@@ -79,6 +85,7 @@ class ConversationController extends ChangeNotifier {
       return;
     }
 
+    await vitsPlayback.stop();
     final LlmService service = services[runtimeConfig.provider]!;
     final List<String> moods =
         await characterRepository.getTachieMoodNames(selectedCharacter);
@@ -88,6 +95,7 @@ class ConversationController extends ChangeNotifier {
     currentMood = 'default';
     currentDisplayText = '...';
     _rawReply = '';
+    _streamSynthCursor = 0;
     notifyListeners();
 
     try {
@@ -103,6 +111,9 @@ class ConversationController extends ChangeNotifier {
         _rawReply = event.rawText;
         if (event.displayedChinese.isNotEmpty) {
           currentDisplayText = event.displayedChinese;
+        }
+        if (_canUseVits && appConfig.vits.sentenceSplit) {
+          _queueStreamVitsSegments();
         }
         if (!event.isCompleted) {
           notifyListeners();
@@ -122,6 +133,7 @@ class ConversationController extends ChangeNotifier {
         await conversationRepository.appendUserLine(userInput);
         await conversationRepository.appendRoleLine(parsed.chinese);
         history = await conversationRepository.loadHistory(selectedCharacter);
+        _queueFinalVitsSegments(parsed.japanese);
       }
     } on LlmException catch (error) {
       currentMood = 'default';
@@ -151,7 +163,7 @@ class ConversationController extends ChangeNotifier {
     required double scale,
     required Offset offset,
   }) async {
-    final int size = (scale * 100).round().clamp(50, 220);
+    final int size = (scale * 100).round().clamp(50, 220).toInt();
     runtimeConfig = runtimeConfig.copyWith(
       tachieSize: size,
       tachieOffsetX: offset.dx,
@@ -174,6 +186,91 @@ class ConversationController extends ChangeNotifier {
     );
     notifyListeners();
     await characterRepository.resetTachieTransform(selectedCharacter);
+  }
+
+  bool get _canUseVits {
+    return runtimeConfig.vitsEnable &&
+        runtimeConfig.vitsMasSelect.trim().isNotEmpty &&
+        appConfig.vits.apiUrl.trim().isNotEmpty;
+  }
+
+  void _queueStreamVitsSegments() {
+    final int firstSep = _rawReply.indexOf('|');
+    if (firstSep < 0) {
+      return;
+    }
+
+    final int secondSep = _rawReply.indexOf('|', firstSep + 1);
+    if (secondSep < 0) {
+      return;
+    }
+
+    final String japanesePartial = _rawReply.substring(secondSep + 1);
+    final List<String> readySegments = <String>[];
+    int sentenceEnd = _findNextSentenceEnd(japanesePartial, _streamSynthCursor);
+    while (sentenceEnd >= 0) {
+      final String sentence = japanesePartial
+          .substring(_streamSynthCursor, sentenceEnd + 1)
+          .trim();
+      _streamSynthCursor = sentenceEnd + 1;
+      if (sentence.isNotEmpty) {
+        readySegments.add(sentence);
+      }
+      sentenceEnd = _findNextSentenceEnd(japanesePartial, _streamSynthCursor);
+    }
+
+    _queueVitsSegments(readySegments);
+  }
+
+  void _queueFinalVitsSegments(String japaneseReply) {
+    if (!_canUseVits) {
+      return;
+    }
+
+    if (appConfig.vits.sentenceSplit) {
+      final int startIndex = _streamSynthCursor < 0
+          ? 0
+          : (_streamSynthCursor > japaneseReply.length
+              ? japaneseReply.length
+              : _streamSynthCursor);
+      final String remaining = japaneseReply.substring(startIndex).trim();
+      _queueVitsSegments(<String>[remaining]);
+      return;
+    }
+
+    _queueVitsSegments(<String>[japaneseReply]);
+  }
+
+  void _queueVitsSegments(Iterable<String> segments) {
+    if (!_canUseVits) {
+      return;
+    }
+
+    final List<String> readySegments = segments
+        .map((String segment) => segment.trim())
+        .where((String segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    if (readySegments.isEmpty) {
+      return;
+    }
+
+    unawaited(
+      vitsPlayback.enqueueSegments(
+        apiUrl: appConfig.vits.apiUrl,
+        modelAndSpeaker: runtimeConfig.vitsMasSelect,
+        texts: readySegments,
+      ),
+    );
+  }
+
+  int _findNextSentenceEnd(String text, int startIndex) {
+    for (int index = startIndex; index < text.length; index += 1) {
+      final String char = text[index];
+      if (_sentenceEndMarks.contains(char)) {
+        return index;
+      }
+    }
+    return -1;
   }
 
   String _buildSystemPrompt(List<String> moods) {
@@ -201,4 +298,19 @@ class ConversationController extends ChangeNotifier {
 
     return buffer.toString();
   }
+
+  @override
+  void dispose() {
+    unawaited(vitsPlayback.stop());
+    super.dispose();
+  }
 }
+
+const Set<String> _sentenceEndMarks = <String>{
+  '。',
+  '！',
+  '？',
+  '!',
+  '?',
+  '\n',
+};

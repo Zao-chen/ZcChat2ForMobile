@@ -8,6 +8,7 @@ environment:
 
 dependencies:
   archive: ^4.0.9
+  audioplayers: ^6.5.1
   file_picker: ^10.3.10
   flutter:
     sdk: flutter

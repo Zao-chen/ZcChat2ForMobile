@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import 'controllers/chat_controller.dart';
 import 'models/app_models.dart';
@@ -6,6 +6,9 @@ import 'repositories/app_repositories.dart';
 import 'repositories/app_storage_paths.dart';
 import 'services/llm_service.dart';
 import 'services/openai_compatible_llm_service.dart';
+import 'services/vits_playback_service.dart';
+import 'services/vits_service.dart';
+import 'services/vits_simple_api_service.dart';
 import 'ui/conversation_page.dart';
 import 'ui/settings_page.dart';
 
@@ -26,6 +29,8 @@ class _ZcChatAppState extends State<ZcChatApp> {
   late final SettingsRepository _settingsRepository;
   late final ConversationRepository _conversationRepository;
   late final Map<LlmProviderType, LlmService> _services;
+  late final VitsService _vitsService;
+  late final VitsPlayback _vitsPlayback;
   late final ConversationController _controller;
 
   @override
@@ -41,11 +46,14 @@ class _ZcChatAppState extends State<ZcChatApp> {
       LlmProviderType.openAI: OpenAiLlmService(),
       LlmProviderType.deepSeek: DeepSeekLlmService(),
     };
+    _vitsService = VitsSimpleApiService();
+    _vitsPlayback = VitsPlaybackService(service: _vitsService);
     _controller = ConversationController(
       characterRepository: _characterRepository,
       settingsRepository: _settingsRepository,
       conversationRepository: _conversationRepository,
       services: _services,
+      vitsPlayback: _vitsPlayback,
     );
   }
 
@@ -54,6 +62,8 @@ class _ZcChatAppState extends State<ZcChatApp> {
     for (final LlmService service in _services.values) {
       service.dispose();
     }
+    _vitsPlayback.dispose();
+    _vitsService.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -81,6 +91,7 @@ class _ZcChatAppState extends State<ZcChatApp> {
             characterRepository: _characterRepository,
             settingsRepository: _settingsRepository,
             services: _services,
+            vitsService: _vitsService,
           );
         },
       ),

@@ -77,6 +77,31 @@ class SettingsRepository {
         .copyWith(models: models.toList(growable: false));
     await saveAppConfig(config.copyWithProvider(provider, updated));
   }
+
+  Future<void> saveVitsApiUrl(String apiUrl) async {
+    final AppConfig config = await loadAppConfig();
+    await saveAppConfig(
+      config.copyWithVits(config.vits.copyWith(apiUrl: apiUrl.trim())),
+    );
+  }
+
+  Future<void> saveVitsModelAndSpeakers(List<String> modelAndSpeakers) async {
+    final AppConfig config = await loadAppConfig();
+    await saveAppConfig(
+      config.copyWithVits(
+        config.vits.copyWith(
+          modelAndSpeakers: modelAndSpeakers.toList(growable: false),
+        ),
+      ),
+    );
+  }
+
+  Future<void> saveVitsSentenceSplit(bool enabled) async {
+    final AppConfig config = await loadAppConfig();
+    await saveAppConfig(
+      config.copyWithVits(config.vits.copyWith(sentenceSplit: enabled)),
+    );
+  }
 }
 
 class CharacterRepository {
@@ -213,6 +238,30 @@ class CharacterRepository {
     await _writeJsonObject(
       paths.characterRuntimeConfigFile(characterName),
       current.copyWith(modelSelect: modelId).toJson(),
+    );
+  }
+
+  Future<void> saveCharacterVitsEnabled(
+    String characterName,
+    bool enabled,
+  ) async {
+    final CharacterRuntimeConfig current =
+        await loadCharacterRuntimeConfig(characterName);
+    await _writeJsonObject(
+      paths.characterRuntimeConfigFile(characterName),
+      current.copyWith(vitsEnable: enabled).toJson(),
+    );
+  }
+
+  Future<void> saveCharacterVitsModelAndSpeaker(
+    String characterName,
+    String modelAndSpeaker,
+  ) async {
+    final CharacterRuntimeConfig current =
+        await loadCharacterRuntimeConfig(characterName);
+    await _writeJsonObject(
+      paths.characterRuntimeConfigFile(characterName),
+      current.copyWith(vitsMasSelect: modelAndSpeaker).toJson(),
     );
   }
 
@@ -478,5 +527,3 @@ class _ArchiveImportEntry {
     return _ArchiveImportEntry(file: file, pathSegments: segments);
   }
 }
-
-

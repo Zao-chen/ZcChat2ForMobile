@@ -8,6 +8,7 @@ import 'package:zcchat2_for_mobile/src/models/app_models.dart';
 import 'package:zcchat2_for_mobile/src/repositories/app_repositories.dart';
 import 'package:zcchat2_for_mobile/src/repositories/app_storage_paths.dart';
 import 'package:zcchat2_for_mobile/src/services/llm_service.dart';
+import 'package:zcchat2_for_mobile/src/services/vits_service.dart';
 import 'package:zcchat2_for_mobile/src/ui/conversation_page.dart';
 
 class FakeLlmService implements LlmService {
@@ -34,6 +35,21 @@ class FakeLlmService implements LlmService {
       isCompleted: true,
     );
   }
+
+  @override
+  void dispose() {}
+}
+
+class FakeVitsPlayback implements VitsPlayback {
+  @override
+  Future<void> enqueueSegments({
+    required String apiUrl,
+    required String modelAndSpeaker,
+    required Iterable<String> texts,
+  }) async {}
+
+  @override
+  Future<void> stop() async {}
 
   @override
   void dispose() {}
@@ -80,6 +96,7 @@ void main() {
           LlmProviderType.openAI: FakeLlmService(LlmProviderType.openAI),
           LlmProviderType.deepSeek: FakeLlmService(LlmProviderType.deepSeek),
         },
+        vitsPlayback: FakeVitsPlayback(),
       );
       await controller.initialize();
 
