@@ -1,7 +1,7 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+﻿<manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <application
-        android:label="zcchat2_for_android"
+        android:label="ZcChat2 for Android"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -44,3 +44,4 @@
         </intent>
     </queries>
 </manifest>
+

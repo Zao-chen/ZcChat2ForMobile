@@ -72,7 +72,7 @@ class _ZcChatAppState extends State<ZcChatApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'ZcChat2 Android',
+      title: 'ZcChat2 for Android',
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
@@ -98,3 +98,4 @@ class _ZcChatAppState extends State<ZcChatApp> {
     );
   }
 }
+
