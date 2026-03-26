@@ -1,14 +1,10 @@
-name: Android Release
+﻿name: Android Release
 
 on:
   workflow_dispatch:
     inputs:
       tag:
         description: "Release tag. Leave empty to use v<pubspec version>."
-        required: false
-        type: string
-      release_name:
-        description: "Release title. Leave empty to use Android <tag>."
         required: false
         type: string
       prerelease:
@@ -60,11 +56,7 @@ jobs:
             TAG="v${VERSION}"
           fi
 
-          if [ -n "${{ github.event.inputs.release_name }}" ]; then
-            RELEASE_NAME="${{ github.event.inputs.release_name }}"
-          else
-            RELEASE_NAME="Android ${TAG}"
-          fi
+          RELEASE_NAME="ZcChat2ForMobile v${VERSION}"
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
