@@ -2,6 +2,8 @@
 
 一个模仿 Galgame 演出效果的AI桌宠 —— [ZcChat2](https://github.com/Zao-chen/ZcChat2) 的移动端版本
 
+<img width="1376" height="768" alt="ZcChat2" src="https://github.com/user-attachments/assets/6c1941e7-06a2-4df0-bee5-71a348085eb7" />
+
 ## 🎯项目介绍
 
 为竖屏设备设计的版本，和 Galgame 角色在手机上对话！
