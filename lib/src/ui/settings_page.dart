@@ -283,7 +283,7 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
   }
 }
 
-class VitsSettingsHomePage extends StatelessWidget {
+class VitsSettingsHomePage extends StatefulWidget {
   const VitsSettingsHomePage({
     required this.settingsRepository,
     required this.vitsService,
@@ -294,27 +294,81 @@ class VitsSettingsHomePage extends StatelessWidget {
   final VitsService vitsService;
 
   @override
+  State<VitsSettingsHomePage> createState() => _VitsSettingsHomePageState();
+}
+
+class _VitsSettingsHomePageState extends State<VitsSettingsHomePage> {
+  bool _isLoading = true;
+  AppConfig _appConfig = AppConfig.initial();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final AppConfig config = await widget.settingsRepository.loadAppConfig();
+    _appConfig = config;
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _toggleSentenceSplit(bool enabled) async {
+    setState(() {
+      _appConfig = _appConfig.copyWithVits(
+        _appConfig.vits.copyWith(sentenceSplit: enabled),
+      );
+    });
+    await widget.settingsRepository.saveVitsSentenceSplit(enabled);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('语言合成'),
+        title: const Text('\u8bed\u8a00\u5408\u6210'),
       ),
       body: ListView(
+        padding: const EdgeInsets.all(16),
         children: <Widget>[
-          _SettingsEntry(
-            title: 'vits-simple-api',
-            subtitle: 'API 地址、角色列表、句切分',
-            icon: Icons.graphic_eq_rounded,
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => VitsSimpleApiSettingsPage(
-                    settingsRepository: settingsRepository,
-                    vitsService: vitsService,
+          _SettingsSection(
+            title: '\u63a5\u53e3',
+            child: _SettingsEntry(
+              title: 'vits-simple-api',
+              subtitle: 'API \u5730\u5740\u3001\u89d2\u8272\u5217\u8868',
+              icon: Icons.graphic_eq_rounded,
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => VitsSimpleApiSettingsPage(
+                      settingsRepository: widget.settingsRepository,
+                      vitsService: widget.vitsService,
+                    ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SettingsSection(
+            title: '\u8bbe\u7f6e',
+            child: SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              value: _appConfig.vits.sentenceSplit,
+              title: const Text('\u5207\u5206\u751f\u6210\u8bed\u97f3'),
+              subtitle: const Text('\u5bf9\u8bdd\u65f6\u6309\u65e5\u8bed\u53e5\u5b50\u5206\u6bb5\u8bf7\u6c42\u5e76\u64ad\u653e'),
+              onChanged: _toggleSentenceSplit,
+            ),
           ),
         ],
       ),
@@ -370,15 +424,6 @@ class _VitsSimpleApiSettingsPageState extends State<VitsSimpleApiSettingsPage> {
   Future<void> _saveApiUrl(String value) async {
     await widget.settingsRepository.saveVitsApiUrl(value);
     _appConfig = await widget.settingsRepository.loadAppConfig();
-  }
-
-  Future<void> _toggleSentenceSplit(bool enabled) async {
-    setState(() {
-      _appConfig = _appConfig.copyWithVits(
-        _appConfig.vits.copyWith(sentenceSplit: enabled),
-      );
-    });
-    await widget.settingsRepository.saveVitsSentenceSplit(enabled);
   }
 
   Future<void> _fetchModelAndSpeakers() async {
@@ -450,17 +495,6 @@ class _VitsSimpleApiSettingsPageState extends State<VitsSimpleApiSettingsPage> {
                 filled: true,
               ),
               onChanged: _saveApiUrl,
-            ),
-          ),
-          const SizedBox(height: 16),
-          _SettingsSection(
-            title: '句切分',
-            child: SwitchListTile.adaptive(
-              contentPadding: EdgeInsets.zero,
-              value: _appConfig.vits.sentenceSplit,
-              title: const Text('切分生成语音'),
-              subtitle: const Text('对话时按日语句子分段请求并播放'),
-              onChanged: _toggleSentenceSplit,
             ),
           ),
           const SizedBox(height: 16),
