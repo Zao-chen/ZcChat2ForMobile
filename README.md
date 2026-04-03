@@ -1,4 +1,4 @@
-﻿# ZcChat2 for Android
+﻿# ZcChat2 for Mobile
 
 一个模仿 Galgame 演出效果的AI桌宠 —— [ZcChat2](https://github.com/Zao-chen/ZcChat2) 的移动端版本
 
