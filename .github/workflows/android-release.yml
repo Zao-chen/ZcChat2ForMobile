@@ -7,6 +7,10 @@ on:
         description: "Release tag. Leave empty to use v<pubspec version>."
         required: false
         type: string
+      title:
+        description: "Release title. Leave empty to use default title."
+        required: false
+        type: string
       prerelease:
         description: "Mark release as prerelease"
         required: false
@@ -56,7 +60,11 @@ jobs:
             TAG="v${VERSION}"
           fi
 
-          RELEASE_NAME="ZcChat2ForMobile v${VERSION}"
+          if [ -n "${{ github.event.inputs.title }}" ]; then
+            RELEASE_NAME="${{ github.event.inputs.title }}"
+          else
+            RELEASE_NAME="ZcChat2ForMobile v${VERSION}"
+          fi
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
