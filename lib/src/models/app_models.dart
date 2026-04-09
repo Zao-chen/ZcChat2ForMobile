@@ -1,16 +1,10 @@
 ﻿class ModelProviderConfig {
-  const ModelProviderConfig({
-    this.apiKey = '',
-    this.models = const <String>[],
-  });
+  const ModelProviderConfig({this.apiKey = '', this.models = const <String>[]});
 
   final String apiKey;
   final List<String> models;
 
-  ModelProviderConfig copyWith({
-    String? apiKey,
-    List<String>? models,
-  }) {
+  ModelProviderConfig copyWith({String? apiKey, List<String>? models}) {
     return ModelProviderConfig(
       apiKey: apiKey ?? this.apiKey,
       models: models ?? this.models,
@@ -30,10 +24,7 @@
   }
 
   Map<String, dynamic> toJson() {
-    return <String, dynamic>{
-      'ApiKey': apiKey,
-      'ModelList': models,
-    };
+    return <String, dynamic>{'ApiKey': apiKey, 'ModelList': models};
   }
 }
 
@@ -133,10 +124,7 @@ enum LlmProviderType {
 }
 
 class AppConfig {
-  const AppConfig({
-    required this.providers,
-    required this.vits,
-  });
+  const AppConfig({required this.providers, required this.vits});
 
   final Map<LlmProviderType, ModelProviderConfig> providers;
   final VitsConfig vits;
@@ -154,7 +142,7 @@ class AppConfig {
   factory AppConfig.fromJson(Map<String, dynamic> json) {
     final Map<String, dynamic> llmMap =
         (json['llm'] as Map?)?.cast<String, dynamic>() ??
-            const <String, dynamic>{};
+        const <String, dynamic>{};
 
     final Map<LlmProviderType, ModelProviderConfig> providers =
         <LlmProviderType, ModelProviderConfig>{};
@@ -162,18 +150,15 @@ class AppConfig {
     for (final LlmProviderType provider in LlmProviderType.values) {
       final Map<String, dynamic> providerMap =
           (llmMap[provider.configKey] as Map?)?.cast<String, dynamic>() ??
-              const <String, dynamic>{};
+          const <String, dynamic>{};
       providers[provider] = ModelProviderConfig.fromJson(providerMap);
     }
 
     final Map<String, dynamic> vitsMap =
         (json['vits'] as Map?)?.cast<String, dynamic>() ??
-            const <String, dynamic>{};
+        const <String, dynamic>{};
 
-    return AppConfig(
-      providers: providers,
-      vits: VitsConfig.fromJson(vitsMap),
-    );
+    return AppConfig(providers: providers, vits: VitsConfig.fromJson(vitsMap));
   }
 
   ModelProviderConfig providerConfig(LlmProviderType provider) {
@@ -194,10 +179,7 @@ class AppConfig {
   }
 
   AppConfig copyWithVits(VitsConfig config) {
-    return AppConfig(
-      providers: providers,
-      vits: config,
-    );
+    return AppConfig(providers: providers, vits: config);
   }
 
   Map<String, dynamic> toJson() {
@@ -206,30 +188,21 @@ class AppConfig {
       llmMap[provider.configKey] = providerConfig(provider).toJson();
     }
 
-    return <String, dynamic>{
-      'llm': llmMap,
-      'vits': vits.toJson(),
-    };
+    return <String, dynamic>{'llm': llmMap, 'vits': vits.toJson()};
   }
 }
 
 class CharacterAssetConfig {
-  const CharacterAssetConfig({
-    this.prompt = '',
-  });
+  const CharacterAssetConfig({this.prompt = ''});
 
   final String prompt;
 
-  CharacterAssetConfig copyWith({
-    String? prompt,
-  }) {
+  CharacterAssetConfig copyWith({String? prompt}) {
     return CharacterAssetConfig(prompt: prompt ?? this.prompt);
   }
 
   factory CharacterAssetConfig.fromJson(Map<String, dynamic> json) {
-    return CharacterAssetConfig(
-      prompt: (json['prompt'] as String?) ?? '',
-    );
+    return CharacterAssetConfig(prompt: (json['prompt'] as String?) ?? '');
   }
 
   Map<String, dynamic> toJson() {
@@ -246,6 +219,7 @@ class CharacterRuntimeConfig {
     this.modelSelect = '',
     this.vitsEnable = false,
     this.vitsMasSelect = '',
+    this.tachieAnimations = const <String, String>{},
   });
 
   final int tachieSize;
@@ -255,6 +229,7 @@ class CharacterRuntimeConfig {
   final String modelSelect;
   final bool vitsEnable;
   final String vitsMasSelect;
+  final Map<String, String> tachieAnimations;
 
   LlmProviderType get provider => LlmProviderType.fromConfigKey(serverSelect);
 
@@ -266,6 +241,7 @@ class CharacterRuntimeConfig {
     String? modelSelect,
     bool? vitsEnable,
     String? vitsMasSelect,
+    Map<String, String>? tachieAnimations,
   }) {
     return CharacterRuntimeConfig(
       tachieSize: tachieSize ?? this.tachieSize,
@@ -275,6 +251,8 @@ class CharacterRuntimeConfig {
       modelSelect: modelSelect ?? this.modelSelect,
       vitsEnable: vitsEnable ?? this.vitsEnable,
       vitsMasSelect: vitsMasSelect ?? this.vitsMasSelect,
+      tachieAnimations:
+          tachieAnimations ?? Map<String, String>.from(this.tachieAnimations),
     );
   }
 
@@ -288,6 +266,19 @@ class CharacterRuntimeConfig {
     final Object? rawOffsetX = json['tachieOffsetX'];
     final Object? rawOffsetY = json['tachieOffsetY'];
     final Object? rawVitsEnable = json['vitsEnable'];
+    final Object? rawTachieAnimations = json['tachieAnimations'];
+
+    final Map<String, String> tachieAnimations = <String, String>{};
+    if (rawTachieAnimations is Map) {
+      for (final MapEntry<dynamic, dynamic> entry
+          in rawTachieAnimations.entries) {
+        final String key = entry.key.toString().trim();
+        final String value = entry.value.toString().trim();
+        if (key.isNotEmpty && value.isNotEmpty) {
+          tachieAnimations[key] = value;
+        }
+      }
+    }
 
     return CharacterRuntimeConfig(
       tachieSize: tachieSize,
@@ -312,6 +303,7 @@ class CharacterRuntimeConfig {
         _ => false,
       },
       vitsMasSelect: (json['vitsMasSelect'] as String?) ?? '',
+      tachieAnimations: tachieAnimations,
     );
   }
 
@@ -324,21 +316,15 @@ class CharacterRuntimeConfig {
       'modelSelect': modelSelect,
       'vitsEnable': vitsEnable,
       'vitsMasSelect': vitsMasSelect,
+      'tachieAnimations': tachieAnimations,
     };
   }
 }
 
-enum HistorySpeaker {
-  user,
-  role,
-  system,
-}
+enum HistorySpeaker { user, role, system }
 
 class HistoryEntry {
-  const HistoryEntry({
-    required this.speaker,
-    required this.text,
-  });
+  const HistoryEntry({required this.speaker, required this.text});
 
   static const String userPrefix = '用户：';
   static const String rolePrefix = '角色：';
@@ -359,10 +345,7 @@ class HistoryEntry {
         text: rawLine.substring(rolePrefix.length),
       );
     }
-    return HistoryEntry(
-      speaker: HistorySpeaker.system,
-      text: rawLine,
-    );
+    return HistoryEntry(speaker: HistorySpeaker.system, text: rawLine);
   }
 
   String toRawLine() {
@@ -378,9 +361,7 @@ class HistoryEntry {
 }
 
 class ContextHistory {
-  const ContextHistory({
-    required this.history,
-  });
+  const ContextHistory({required this.history});
 
   final List<String> history;
 

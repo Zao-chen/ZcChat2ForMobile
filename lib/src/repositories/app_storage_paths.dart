@@ -7,7 +7,8 @@ class AppStoragePaths {
 
   final Directory baseDirectory;
 
-  Directory get rootDirectory => Directory(p.join(baseDirectory.path, 'ZcChat2'));
+  Directory get rootDirectory =>
+      Directory(p.join(baseDirectory.path, 'ZcChat2'));
 
   File get appConfigFile => File(p.join(rootDirectory.path, 'config.json'));
 
@@ -15,6 +16,9 @@ class AppStoragePaths {
 
   Directory get characterAssetsDirectory =>
       Directory(p.join(rootDirectory.path, 'Character', 'Assets'));
+
+  Directory get animePluginDirectory =>
+      Directory(p.join(rootDirectory.path, 'Plugin', 'Anime'));
 
   Directory get characterUserConfigDirectory =>
       Directory(p.join(rootDirectory.path, 'Character', 'UserConfig'));
@@ -29,10 +33,10 @@ class AppStoragePaths {
       File(p.join(characterAssetDirectory(characterName).path, 'config.json'));
 
   File characterRuntimeConfigFile(String characterName) => File(
-        p.join(characterUserConfigDirectory.path, characterName, 'config.json'),
-      );
+    p.join(characterUserConfigDirectory.path, characterName, 'config.json'),
+  );
 
   File characterContextFile(String characterName) => File(
-        p.join(characterUserConfigDirectory.path, characterName, 'context.json'),
-      );
+    p.join(characterUserConfigDirectory.path, characterName, 'context.json'),
+  );
 }

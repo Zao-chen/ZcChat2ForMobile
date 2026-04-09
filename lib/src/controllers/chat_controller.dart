@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
 import '../models/app_models.dart';
+import '../models/anime_plugin_models.dart';
 import '../repositories/app_repositories.dart';
 import '../services/llm_service.dart';
 import '../services/vits_service.dart';
@@ -32,6 +33,7 @@ class ConversationController extends ChangeNotifier {
   CharacterRuntimeConfig runtimeConfig = const CharacterRuntimeConfig();
   AppConfig appConfig = AppConfig.initial();
   ContextHistory history = const ContextHistory(history: <String>[]);
+  AnimePluginRegistry animePluginRegistry = const AnimePluginRegistry.empty();
   String currentMood = 'default';
   String currentDisplayText = '';
   File? currentTachieFile;
@@ -48,12 +50,15 @@ class ConversationController extends ChangeNotifier {
 
     await vitsPlayback.stop();
     selectedCharacter = await characterRepository.getSelectedCharacter();
-    characterAssetConfig =
-        await characterRepository.loadCharacterAssetConfig(selectedCharacter);
-    runtimeConfig =
-        await characterRepository.loadCharacterRuntimeConfig(selectedCharacter);
+    characterAssetConfig = await characterRepository.loadCharacterAssetConfig(
+      selectedCharacter,
+    );
+    runtimeConfig = await characterRepository.loadCharacterRuntimeConfig(
+      selectedCharacter,
+    );
     appConfig = await settingsRepository.loadAppConfig();
     history = await conversationRepository.loadHistory(selectedCharacter);
+    animePluginRegistry = await characterRepository.loadAnimePluginRegistry();
     currentMood = 'default';
     currentTachieFile = await characterRepository.resolveTachieFile(
       selectedCharacter,
@@ -70,8 +75,9 @@ class ConversationController extends ChangeNotifier {
       return;
     }
 
-    final ModelProviderConfig providerConfig =
-        appConfig.providerConfig(runtimeConfig.provider);
+    final ModelProviderConfig providerConfig = appConfig.providerConfig(
+      runtimeConfig.provider,
+    );
     if (providerConfig.apiKey.isEmpty || runtimeConfig.modelSelect.isEmpty) {
       currentMood = 'default';
       currentDisplayText = '请先在设置页配置服务商、API Key 和模型。';
@@ -87,8 +93,9 @@ class ConversationController extends ChangeNotifier {
 
     await vitsPlayback.stop();
     final LlmService service = services[runtimeConfig.provider]!;
-    final List<String> moods =
-        await characterRepository.getTachieMoodNames(selectedCharacter);
+    final List<String> moods = await characterRepository.getTachieMoodNames(
+      selectedCharacter,
+    );
 
     isSending = true;
     showContinueButton = false;
@@ -104,8 +111,9 @@ class ConversationController extends ChangeNotifier {
           apiKey: providerConfig.apiKey,
           model: runtimeConfig.modelSelect,
           systemPrompt: _buildSystemPrompt(moods),
-          userMessage:
-              await conversationRepository.buildUserMessageWithContext(userInput),
+          userMessage: await conversationRepository.buildUserMessageWithContext(
+            userInput,
+          ),
         ),
       )) {
         _rawReply = event.rawText;
@@ -120,8 +128,9 @@ class ConversationController extends ChangeNotifier {
         }
       }
 
-      final ParsedCharacterReply? parsed =
-          ParsedCharacterReply.tryParse(_rawReply);
+      final ParsedCharacterReply? parsed = ParsedCharacterReply.tryParse(
+        _rawReply,
+      );
       if (parsed == null) {
         currentMood = 'default';
         currentDisplayText = _rawReply.trim().isEmpty
@@ -231,8 +240,8 @@ class ConversationController extends ChangeNotifier {
       final int startIndex = _streamSynthCursor < 0
           ? 0
           : (_streamSynthCursor > japaneseReply.length
-              ? japaneseReply.length
-              : _streamSynthCursor);
+                ? japaneseReply.length
+                : _streamSynthCursor);
       final String remaining = japaneseReply.substring(startIndex).trim();
       _queueVitsSegments(<String>[remaining]);
       return;
@@ -282,8 +291,8 @@ class ConversationController extends ChangeNotifier {
         ..writeln();
     }
 
-    final String moodList =
-        (moods.isEmpty ? const <String>['default'] : moods).join(', ');
+    final String moodList = (moods.isEmpty ? const <String>['default'] : moods)
+        .join(', ');
     buffer
       ..writeln('你是一个 Galgame 风格的 AI 角色。')
       ..writeln('输出内容必须严格按照以下格式：')
@@ -306,11 +315,4 @@ class ConversationController extends ChangeNotifier {
   }
 }
 
-const Set<String> _sentenceEndMarks = <String>{
-  '。',
-  '！',
-  '？',
-  '!',
-  '?',
-  '\n',
-};
+const Set<String> _sentenceEndMarks = <String>{'。', '！', '？', '!', '?', '\n'};

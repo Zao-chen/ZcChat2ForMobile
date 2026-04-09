@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../models/app_models.dart';
+import '../models/anime_plugin_models.dart';
 import '../repositories/app_repositories.dart';
 import '../services/llm_service.dart';
 import '../services/vits_service.dart';
@@ -26,9 +27,7 @@ class SettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('设置'),
-      ),
+      appBar: AppBar(title: const Text('设置')),
       body: ListView(
         children: <Widget>[
           _SettingsEntry(
@@ -62,6 +61,20 @@ class SettingsPage extends StatelessWidget {
             },
           ),
           _SettingsEntry(
+            title: '插件配置',
+            subtitle: '动画插件管理与详情',
+            icon: Icons.extension_rounded,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => PluginSettingsPage(
+                    characterRepository: characterRepository,
+                  ),
+                ),
+              );
+            },
+          ),
+          _SettingsEntry(
             title: '角色设置',
             subtitle: '当前角色、提示词、立绘大小、运行配置',
             icon: Icons.face_retouching_natural_outlined,
@@ -82,6 +95,234 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
+class PluginSettingsPage extends StatefulWidget {
+  const PluginSettingsPage({required this.characterRepository, super.key});
+
+  final CharacterRepository characterRepository;
+
+  @override
+  State<PluginSettingsPage> createState() => _PluginSettingsPageState();
+}
+
+class _PluginSettingsPageState extends State<PluginSettingsPage> {
+  bool _isLoading = true;
+  AnimePluginRegistry _registry = const AnimePluginRegistry.empty();
+
+  @override
+  void initState() {
+    super.initState();
+    _reloadPlugins();
+  }
+
+  Future<void> _reloadPlugins() async {
+    final AnimePluginRegistry registry = await widget.characterRepository
+        .loadAnimePluginRegistry();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _registry = registry;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _importAnimePlugin() async {
+    final FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const <String>['json'],
+    );
+    if (result == null || result.files.isEmpty) {
+      return;
+    }
+
+    final PlatformFile picked = result.files.single;
+    if (picked.path == null || picked.path!.trim().isEmpty) {
+      _showSnackBar('无法读取插件文件路径');
+      return;
+    }
+
+    try {
+      final String pluginName = await widget.characterRepository
+          .installAnimePluginFromFile(picked.path!);
+      await _reloadPlugins();
+      _showSnackBar('已导入插件: $pluginName');
+    } on CharacterImportException catch (error) {
+      _showSnackBar(error.message);
+    } catch (error) {
+      _showSnackBar('导入失败: $error');
+    }
+  }
+
+  Future<void> _deletePlugin(String pluginName) async {
+    try {
+      await widget.characterRepository.deleteAnimePluginByName(pluginName);
+      await _reloadPlugins();
+      _showSnackBar('已删除插件: $pluginName');
+    } on CharacterImportException catch (error) {
+      _showSnackBar(error.message);
+    } catch (error) {
+      _showSnackBar('删除失败: $error');
+    }
+  }
+
+  void _openPluginDetail(String pluginName) {
+    for (final AnimePluginDefinition plugin in _registry.plugins) {
+      if (plugin.name == pluginName) {
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => AnimePluginDetailPage(plugin: plugin),
+          ),
+        );
+        return;
+      }
+    }
+    _showSnackBar('未找到插件，可能已被删除');
+  }
+
+  void _showSnackBar(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('插件配置')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Text('已安装动画插件', style: Theme.of(context).textTheme.titleMedium),
+                const Spacer(),
+                OutlinedButton.icon(
+                  onPressed: _reloadPlugins,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('刷新'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: _importAnimePlugin,
+                  icon: const Icon(Icons.file_upload_outlined),
+                  label: const Text('导入插件'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (_registry.plugins.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 16),
+                child: Text('暂无动画插件，请先导入 json 插件文件。'),
+              ),
+            if (_registry.lastErrors.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8, bottom: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: _registry.lastErrors
+                      .map(
+                        (String error) => Text(
+                          '[错误] $error',
+                          style: const TextStyle(color: Colors.redAccent),
+                        ),
+                      )
+                      .toList(growable: false),
+                ),
+              ),
+            const SizedBox(height: 4),
+            Expanded(
+              child: ListView.builder(
+                itemCount: _registry.plugins.length,
+                itemBuilder: (BuildContext context, int index) {
+                  final AnimePluginDefinition plugin = _registry.plugins[index];
+                  return Card(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  plugin.name,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '版本: ${plugin.version}  作者: ${plugin.author}',
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          TextButton(
+                            onPressed: () => _deletePlugin(plugin.name),
+                            child: const Text('删除插件'),
+                          ),
+                          const SizedBox(width: 6),
+                          FilledButton.tonal(
+                            onPressed: () => _openPluginDetail(plugin.name),
+                            child: const Text('查看动画'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class AnimePluginDetailPage extends StatelessWidget {
+  const AnimePluginDetailPage({required this.plugin, super.key});
+
+  final AnimePluginDefinition plugin;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('动画 - ${plugin.name}')),
+      body: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: plugin.animations.length,
+        separatorBuilder: (_, _) => const Divider(height: 1),
+        itemBuilder: (BuildContext context, int index) {
+          final AnimePluginAnimation animation = plugin.animations[index];
+          final String uniqueKey = animation.buildUniqueKey(plugin.name);
+          return ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(uniqueKey),
+            subtitle: Text('步骤数: ${animation.steps.length}'),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class LlmSettingsHomePage extends StatelessWidget {
   const LlmSettingsHomePage({
     required this.settingsRepository,
@@ -95,9 +336,7 @@ class LlmSettingsHomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('对话模型'),
-      ),
+      appBar: AppBar(title: const Text('对话模型')),
       body: ListView(
         children: <Widget>[
           for (final LlmProviderType provider in LlmProviderType.values)
@@ -189,8 +428,14 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
 
     try {
       final List<String> models = await widget.service.fetchModels(apiKey);
-      await widget.settingsRepository.saveProviderApiKey(widget.provider, apiKey);
-      await widget.settingsRepository.saveProviderModels(widget.provider, models);
+      await widget.settingsRepository.saveProviderApiKey(
+        widget.provider,
+        apiKey,
+      );
+      await widget.settingsRepository.saveProviderModels(
+        widget.provider,
+        models,
+      );
       _appConfig = await widget.settingsRepository.loadAppConfig();
       _showSnackBar(models.isEmpty ? '未获取到模型列表' : '模型列表已刷新');
     } on LlmException catch (error) {
@@ -210,25 +455,23 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final List<String> models = _appConfig.providerConfig(widget.provider).models;
+    final List<String> models = _appConfig
+        .providerConfig(widget.provider)
+        .models;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.provider.label),
-      ),
+      appBar: AppBar(title: Text(widget.provider.label)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
@@ -329,15 +572,11 @@ class _VitsSettingsHomePageState extends State<VitsSettingsHomePage> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('\u8bed\u8a00\u5408\u6210'),
-      ),
+      appBar: AppBar(title: const Text('\u8bed\u8a00\u5408\u6210')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
@@ -366,7 +605,9 @@ class _VitsSettingsHomePageState extends State<VitsSettingsHomePage> {
               contentPadding: EdgeInsets.zero,
               value: _appConfig.vits.sentenceSplit,
               title: const Text('\u5207\u5206\u751f\u6210\u8bed\u97f3'),
-              subtitle: const Text('\u5bf9\u8bdd\u65f6\u6309\u65e5\u8bed\u53e5\u5b50\u5206\u6bb5\u8bf7\u6c42\u5e76\u64ad\u653e'),
+              subtitle: const Text(
+                '\u5bf9\u8bdd\u65f6\u6309\u65e5\u8bed\u53e5\u5b50\u5206\u6bb5\u8bf7\u6c42\u5e76\u64ad\u653e',
+              ),
               onChanged: _toggleSentenceSplit,
             ),
           ),
@@ -438,15 +679,14 @@ class _VitsSimpleApiSettingsPageState extends State<VitsSimpleApiSettingsPage> {
     });
 
     try {
-      final List<String> modelAndSpeakers =
-          await widget.vitsService.fetchModelAndSpeakers(apiUrl);
+      final List<String> modelAndSpeakers = await widget.vitsService
+          .fetchModelAndSpeakers(apiUrl);
       await widget.settingsRepository.saveVitsApiUrl(apiUrl);
-      await widget.settingsRepository
-          .saveVitsModelAndSpeakers(modelAndSpeakers);
-      _appConfig = await widget.settingsRepository.loadAppConfig();
-      _showSnackBar(
-        modelAndSpeakers.isEmpty ? '未获取到角色列表' : '角色列表已刷新',
+      await widget.settingsRepository.saveVitsModelAndSpeakers(
+        modelAndSpeakers,
       );
+      _appConfig = await widget.settingsRepository.loadAppConfig();
+      _showSnackBar(modelAndSpeakers.isEmpty ? '未获取到角色列表' : '角色列表已刷新');
     } on VitsException catch (error) {
       _showSnackBar(error.message);
     } catch (error) {
@@ -464,25 +704,21 @@ class _VitsSimpleApiSettingsPageState extends State<VitsSimpleApiSettingsPage> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     final List<String> modelAndSpeakers = _appConfig.vits.modelAndSpeakers;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('vits-simple-api'),
-      ),
+      appBar: AppBar(title: const Text('vits-simple-api')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
@@ -504,7 +740,9 @@ class _VitsSimpleApiSettingsPageState extends State<VitsSimpleApiSettingsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 FilledButton.icon(
-                  onPressed: _isFetchingSpeakers ? null : _fetchModelAndSpeakers,
+                  onPressed: _isFetchingSpeakers
+                      ? null
+                      : _fetchModelAndSpeakers,
                   icon: _isFetchingSpeakers
                       ? const SizedBox(
                           width: 18,
@@ -575,13 +813,15 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
   }
 
   Future<void> _load() async {
-    final List<String> characters = await widget.characterRepository.getCharacters();
-    final String selectedCharacter =
-        await widget.characterRepository.getSelectedCharacter();
-    final CharacterAssetConfig assetConfig =
-        await widget.characterRepository.loadCharacterAssetConfig(selectedCharacter);
-    final CharacterRuntimeConfig runtimeConfig =
-        await widget.characterRepository.loadCharacterRuntimeConfig(selectedCharacter);
+    final List<String> characters = await widget.characterRepository
+        .getCharacters();
+    final String selectedCharacter = await widget.characterRepository
+        .getSelectedCharacter();
+    final CharacterAssetConfig assetConfig = await widget.characterRepository
+        .loadCharacterAssetConfig(selectedCharacter);
+    final CharacterRuntimeConfig runtimeConfig = await widget
+        .characterRepository
+        .loadCharacterRuntimeConfig(selectedCharacter);
     final AppConfig appConfig = await widget.settingsRepository.loadAppConfig();
 
     _characters = characters;
@@ -632,10 +872,7 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
 
     try {
       final String characterName = await widget.characterRepository
-          .importCharacterArchive(
-        bytes,
-        archiveName: pickedFile.name,
-      );
+          .importCharacterArchive(bytes, archiveName: pickedFile.name);
       await _load();
       _showSnackBar('角色 $characterName 已导入');
     } on CharacterImportException catch (error) {
@@ -653,7 +890,10 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
 
   Future<void> _savePrompt(String value) async {
     _assetConfig = _assetConfig.copyWith(prompt: value);
-    await widget.characterRepository.saveCharacterPrompt(_selectedCharacter, value);
+    await widget.characterRepository.saveCharacterPrompt(
+      _selectedCharacter,
+      value,
+    );
   }
 
   Future<void> _saveTachieSize(double value) async {
@@ -664,8 +904,15 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
     await widget.characterRepository.saveTachieSize(_selectedCharacter, size);
   }
 
-  Future<void> _resetTachieTransform() async {
-    await widget.characterRepository.resetTachieTransform(_selectedCharacter);
+  Future<void> _openTachieSettings() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TachieSettingsPage(
+          characterRepository: widget.characterRepository,
+          characterName: _selectedCharacter,
+        ),
+      ),
+    );
     await _load();
   }
 
@@ -697,7 +944,10 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
     setState(() {
       _runtimeConfig = _runtimeConfig.copyWith(modelSelect: model);
     });
-    await widget.characterRepository.saveCharacterModel(_selectedCharacter, model);
+    await widget.characterRepository.saveCharacterModel(
+      _selectedCharacter,
+      model,
+    );
   }
 
   Future<void> _changeVitsEnabled(bool enabled) async {
@@ -727,32 +977,29 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final List<String> modelList =
-        _appConfig.providerConfig(_runtimeConfig.provider).models;
+    final List<String> modelList = _appConfig
+        .providerConfig(_runtimeConfig.provider)
+        .models;
     final List<String> vitsList = _appConfig.vits.modelAndSpeakers;
     final String? selectedVitsItem =
         vitsList.contains(_runtimeConfig.vitsMasSelect) &&
-                _runtimeConfig.vitsMasSelect.isNotEmpty
-            ? _runtimeConfig.vitsMasSelect
-            : null;
+            _runtimeConfig.vitsMasSelect.isNotEmpty
+        ? _runtimeConfig.vitsMasSelect
+        : null;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('角色设置'),
-      ),
+      appBar: AppBar(title: const Text('角色设置')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
@@ -764,9 +1011,7 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
                 DropdownButtonFormField<String>(
                   key: ValueKey<String>('character_$_selectedCharacter'),
                   initialValue: _selectedCharacter,
-                  decoration: const InputDecoration(
-                    labelText: '当前角色',
-                  ),
+                  decoration: const InputDecoration(labelText: '当前角色'),
                   items: _characters
                       .map(
                         (String character) => DropdownMenuItem<String>(
@@ -821,23 +1066,25 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
                   min: 50,
                   max: 160,
                   divisions: 22,
-                  value: _runtimeConfig.tachieSize.toDouble().clamp(50.0, 160.0),
+                  value: _runtimeConfig.tachieSize.toDouble().clamp(
+                    50.0,
+                    160.0,
+                  ),
                   label: '${_runtimeConfig.tachieSize}%',
                   onChanged: (double value) {
                     setState(() {
-                      _runtimeConfig =
-                          _runtimeConfig.copyWith(tachieSize: value.round());
+                      _runtimeConfig = _runtimeConfig.copyWith(
+                        tachieSize: value.round(),
+                      );
                     });
                   },
                   onChangeEnd: _saveTachieSize,
                 ),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: _resetTachieTransform,
-                    icon: const Icon(Icons.center_focus_strong_rounded),
-                    label: const Text('重置立绘'),
-                  ),
+                _SettingsEntry(
+                  title: '立绘位置与动画绑定',
+                  subtitle: '位置重置、动作动画绑定',
+                  icon: Icons.wallpaper_rounded,
+                  onTap: _openTachieSettings,
                 ),
               ],
             ),
@@ -849,18 +1096,18 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 DropdownButtonFormField<LlmProviderType>(
-                  key: ValueKey<String>('provider_${_runtimeConfig.serverSelect}'),
-                  initialValue: _runtimeConfig.provider,
-                  decoration: const InputDecoration(
-                    labelText: '对话模型服务商',
+                  key: ValueKey<String>(
+                    'provider_${_runtimeConfig.serverSelect}',
                   ),
+                  initialValue: _runtimeConfig.provider,
+                  decoration: const InputDecoration(labelText: '对话模型服务商'),
                   items: LlmProviderType.values
                       .map(
                         (LlmProviderType provider) =>
                             DropdownMenuItem<LlmProviderType>(
-                          value: provider,
-                          child: Text(provider.label),
-                        ),
+                              value: provider,
+                              child: Text(provider.label),
+                            ),
                       )
                       .toList(growable: false),
                   onChanged: _changeProvider,
@@ -870,13 +1117,12 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
                   key: ValueKey<String>(
                     'model_${_runtimeConfig.serverSelect}_${_runtimeConfig.modelSelect}',
                   ),
-                  initialValue: modelList.contains(_runtimeConfig.modelSelect) &&
+                  initialValue:
+                      modelList.contains(_runtimeConfig.modelSelect) &&
                           _runtimeConfig.modelSelect.isNotEmpty
                       ? _runtimeConfig.modelSelect
                       : null,
-                  decoration: const InputDecoration(
-                    labelText: '当前模型',
-                  ),
+                  decoration: const InputDecoration(labelText: '当前模型'),
                   items: modelList
                       .map(
                         (String model) => DropdownMenuItem<String>(
@@ -909,9 +1155,7 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
                     'vits_${_runtimeConfig.vitsEnable}_${_runtimeConfig.vitsMasSelect}',
                   ),
                   initialValue: selectedVitsItem,
-                  decoration: const InputDecoration(
-                    labelText: '角色语音',
-                  ),
+                  decoration: const InputDecoration(labelText: '角色语音'),
                   items: vitsList
                       .map(
                         (String item) => DropdownMenuItem<String>(
@@ -929,6 +1173,190 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
                     padding: EdgeInsets.only(top: 8),
                     child: Text('先到“语言合成 > vits-simple-api”获取角色列表'),
                   ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class TachieSettingsPage extends StatefulWidget {
+  const TachieSettingsPage({
+    required this.characterRepository,
+    required this.characterName,
+    super.key,
+  });
+
+  final CharacterRepository characterRepository;
+  final String characterName;
+
+  @override
+  State<TachieSettingsPage> createState() => _TachieSettingsPageState();
+}
+
+class _TachieSettingsPageState extends State<TachieSettingsPage> {
+  bool _isLoading = true;
+  CharacterRuntimeConfig _runtimeConfig = const CharacterRuntimeConfig();
+  AnimePluginRegistry _animePluginRegistry = const AnimePluginRegistry.empty();
+  List<String> _tachieActionNames = const <String>['default'];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final CharacterRuntimeConfig runtimeConfig = await widget
+        .characterRepository
+        .loadCharacterRuntimeConfig(widget.characterName);
+    final AnimePluginRegistry animePluginRegistry = await widget
+        .characterRepository
+        .loadAnimePluginRegistry();
+    final List<String> actionNames = await widget.characterRepository
+        .getTachieMoodNames(widget.characterName);
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _runtimeConfig = runtimeConfig;
+      _animePluginRegistry = animePluginRegistry;
+      _tachieActionNames = actionNames.isEmpty
+          ? const <String>['default']
+          : actionNames;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _resetTachieTransform() async {
+    await widget.characterRepository.resetTachieTransform(widget.characterName);
+    await _load();
+  }
+
+  Future<void> _changeTachieAnimationBinding(
+    String actionName,
+    String? animationUniqueKey,
+  ) async {
+    final String? normalizedValue =
+        (animationUniqueKey == null || animationUniqueKey.isEmpty)
+        ? null
+        : animationUniqueKey;
+    final Map<String, String> nextMap = Map<String, String>.from(
+      _runtimeConfig.tachieAnimations,
+    );
+    if (normalizedValue == null) {
+      nextMap.remove(actionName);
+    } else {
+      nextMap[actionName] = normalizedValue;
+    }
+
+    setState(() {
+      _runtimeConfig = _runtimeConfig.copyWith(tachieAnimations: nextMap);
+    });
+    await widget.characterRepository.saveTachieAnimationBinding(
+      widget.characterName,
+      actionName,
+      normalizedValue,
+    );
+  }
+
+  String _animationLabel(String uniqueKey) {
+    final AnimePluginAnimationRef? ref = _animePluginRegistry
+        .tryGetAnimationByUniqueKey(uniqueKey);
+    if (ref == null) {
+      return uniqueKey;
+    }
+    return '${ref.plugin.name} / ${ref.animation.name}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: Text('立绘设置 - ${widget.characterName}')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: <Widget>[
+          _SettingsSection(
+            title: '立绘位置',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: _resetTachieTransform,
+                    icon: const Icon(Icons.center_focus_strong_rounded),
+                    label: const Text('重置立绘位置与缩放'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SettingsSection(
+            title: '动作动画绑定',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  _animePluginRegistry.hasPlugins
+                      ? '已加载插件：${_animePluginRegistry.plugins.length}，可绑定动作：${_tachieActionNames.length}'
+                      : '未检测到动画插件（目录：ZcChat2/Plugin/Anime）',
+                ),
+                if (_animePluginRegistry.lastErrors.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: _animePluginRegistry.lastErrors
+                          .map(
+                            (String error) => Text(
+                              error,
+                              style: const TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: 12,
+                              ),
+                            ),
+                          )
+                          .toList(growable: false),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                for (final String actionName in _tachieActionNames) ...<Widget>[
+                  DropdownButtonFormField<String>(
+                    key: ValueKey<String>('tachie_bind_$actionName'),
+                    initialValue:
+                        _animePluginRegistry.animationUniqueKeys.contains(
+                          _runtimeConfig.tachieAnimations[actionName],
+                        )
+                        ? _runtimeConfig.tachieAnimations[actionName]
+                        : null,
+                    decoration: InputDecoration(labelText: '动作: $actionName'),
+                    items: <DropdownMenuItem<String>>[
+                      const DropdownMenuItem<String>(
+                        value: null,
+                        child: Text('无动画'),
+                      ),
+                      ..._animePluginRegistry.animationUniqueKeys.map(
+                        (String key) => DropdownMenuItem<String>(
+                          value: key,
+                          child: Text(_animationLabel(key)),
+                        ),
+                      ),
+                    ],
+                    onChanged: (String? value) {
+                      _changeTachieAnimationBinding(actionName, value);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                ],
               ],
             ),
           ),
@@ -964,10 +1392,7 @@ class _SettingsEntry extends StatelessWidget {
 }
 
 class _SettingsSection extends StatelessWidget {
-  const _SettingsSection({
-    required this.title,
-    required this.child,
-  });
+  const _SettingsSection({required this.title, required this.child});
 
   final String title;
   final Widget child;
@@ -977,10 +1402,7 @@ class _SettingsSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(
-          title,
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
+        Text(title, style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 12),
         child,
       ],

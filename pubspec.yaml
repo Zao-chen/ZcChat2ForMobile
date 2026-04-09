@@ -25,3 +25,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/bootstrap/character/assets/test/Tachie/default.png
+    - assets/bootstrap/plugin/anime/Basic Animation Package.json

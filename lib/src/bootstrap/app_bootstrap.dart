@@ -11,6 +11,10 @@ import '../repositories/app_storage_paths.dart';
 class AppBootstrap {
   static const String _defaultTachieAssetPath =
       'assets/bootstrap/character/assets/test/Tachie/default.png';
+  static const String _defaultAnimePluginAssetPath =
+      'assets/bootstrap/plugin/anime/Basic Animation Package.json';
+  static const String _defaultAnimePluginFileName =
+      'Basic Animation Package.json';
 
   static Future<AppStoragePaths> ensureInitialized({
     AppStoragePaths? storagePaths,
@@ -24,21 +28,34 @@ class AppBootstrap {
         legacyStoragePaths ?? await _resolveLegacyStoragePaths(paths);
 
     if (legacyPaths != null) {
-      await _migrateLegacyStorage(
-        source: legacyPaths,
-        target: paths,
-      );
+      await _migrateLegacyStorage(source: legacyPaths, target: paths);
     }
 
     await paths.rootDirectory.create(recursive: true);
     await paths.characterAssetsDirectory.create(recursive: true);
     await paths.characterUserConfigDirectory.create(recursive: true);
+    await paths.animePluginDirectory.create(recursive: true);
     await paths.characterTachieDirectory('test').create(recursive: true);
-    await paths.characterRuntimeConfigFile('test').parent.create(recursive: true);
+    await paths
+        .characterRuntimeConfigFile('test')
+        .parent
+        .create(recursive: true);
+
+    final File defaultPluginFile = File(
+      p.join(paths.animePluginDirectory.path, _defaultAnimePluginFileName),
+    );
+    if (!await defaultPluginFile.exists()) {
+      await _copyDefaultAnimePlugin(
+        destinationFile: defaultPluginFile,
+        assetBundle: resolvedAssetBundle,
+      );
+    }
 
     if (!await paths.appConfigFile.exists()) {
       await paths.appConfigFile.writeAsString(
-        const JsonEncoder.withIndent('  ').convert(AppConfig.initial().toJson()),
+        const JsonEncoder.withIndent(
+          '  ',
+        ).convert(AppConfig.initial().toJson()),
       );
     }
 
@@ -47,29 +64,35 @@ class AppBootstrap {
     }
 
     if (!await paths.characterAssetConfigFile('test').exists()) {
-      await paths.characterAssetConfigFile('test').writeAsString(
-        const JsonEncoder.withIndent('  ').convert(
-          const CharacterAssetConfig(
-            prompt: '你是一名温柔、自然的二次元角色，请用轻松的语气与用户对话。',
-          ).toJson(),
-        ),
-      );
+      await paths
+          .characterAssetConfigFile('test')
+          .writeAsString(
+            const JsonEncoder.withIndent('  ').convert(
+              const CharacterAssetConfig(
+                prompt: '你是一名温柔、自然的二次元角色，请用轻松的语气与用户对话。',
+              ).toJson(),
+            ),
+          );
     }
 
     if (!await paths.characterRuntimeConfigFile('test').exists()) {
-      await paths.characterRuntimeConfigFile('test').writeAsString(
-        const JsonEncoder.withIndent('  ').convert(
-          const CharacterRuntimeConfig().toJson(),
-        ),
-      );
+      await paths
+          .characterRuntimeConfigFile('test')
+          .writeAsString(
+            const JsonEncoder.withIndent(
+              '  ',
+            ).convert(const CharacterRuntimeConfig().toJson()),
+          );
     }
 
     if (!await paths.characterContextFile('test').exists()) {
-      await paths.characterContextFile('test').writeAsString(
-        const JsonEncoder.withIndent('  ').convert(
-          const ContextHistory(history: <String>[]).toJson(),
-        ),
-      );
+      await paths
+          .characterContextFile('test')
+          .writeAsString(
+            const JsonEncoder.withIndent(
+              '  ',
+            ).convert(const ContextHistory(history: <String>[]).toJson()),
+          );
     }
 
     final File tachieFile = File(
@@ -101,9 +124,13 @@ class AppBootstrap {
       return null;
     }
 
-    final AppStoragePaths legacyPaths =
-        AppStoragePaths(await getApplicationDocumentsDirectory());
-    if (p.equals(legacyPaths.rootDirectory.path, currentPaths.rootDirectory.path)) {
+    final AppStoragePaths legacyPaths = AppStoragePaths(
+      await getApplicationDocumentsDirectory(),
+    );
+    if (p.equals(
+      legacyPaths.rootDirectory.path,
+      currentPaths.rootDirectory.path,
+    )) {
       return null;
     }
     return legacyPaths;
@@ -121,10 +148,7 @@ class AppBootstrap {
       return;
     }
 
-    await _copyDirectoryContents(
-      source.rootDirectory,
-      target.rootDirectory,
-    );
+    await _copyDirectoryContents(source.rootDirectory, target.rootDirectory);
   }
 
   static Future<void> _copyDirectoryContents(
@@ -170,6 +194,20 @@ class AppBootstrap {
       bytes = base64Decode(_fallbackTransparentPngBase64);
     }
 
+    await destinationFile.writeAsBytes(bytes, flush: true);
+  }
+
+  static Future<void> _copyDefaultAnimePlugin({
+    required File destinationFile,
+    required AssetBundle assetBundle,
+  }) async {
+    if (await destinationFile.exists()) {
+      return;
+    }
+
+    await destinationFile.parent.create(recursive: true);
+    final ByteData data = await assetBundle.load(_defaultAnimePluginAssetPath);
+    final Uint8List bytes = data.buffer.asUint8List();
     await destinationFile.writeAsBytes(bytes, flush: true);
   }
 

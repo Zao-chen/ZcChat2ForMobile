@@ -6,6 +6,8 @@ import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/app_models.dart';
+import '../models/anime_plugin_models.dart';
+import '../services/anime_plugin_manager.dart';
 import 'app_storage_paths.dart';
 
 Future<Map<String, dynamic>> _readJsonObject(File file) async {
@@ -30,9 +32,7 @@ Future<Map<String, dynamic>> _readJsonObject(File file) async {
 
 Future<void> _writeJsonObject(File file, Map<String, dynamic> json) async {
   await file.parent.create(recursive: true);
-  await file.writeAsString(
-    const JsonEncoder.withIndent('  ').convert(json),
-  );
+  await file.writeAsString(const JsonEncoder.withIndent('  ').convert(json));
 }
 
 class CharacterImportException implements Exception {
@@ -62,8 +62,9 @@ class SettingsRepository {
     String apiKey,
   ) async {
     final AppConfig config = await loadAppConfig();
-    final ModelProviderConfig updated =
-        config.providerConfig(provider).copyWith(apiKey: apiKey.trim());
+    final ModelProviderConfig updated = config
+        .providerConfig(provider)
+        .copyWith(apiKey: apiKey.trim());
     await saveAppConfig(config.copyWithProvider(provider, updated));
   }
 
@@ -105,9 +106,11 @@ class SettingsRepository {
 }
 
 class CharacterRepository {
-  CharacterRepository(this.paths);
+  CharacterRepository(this.paths)
+    : _animePluginManager = const AnimePluginManager();
 
   final AppStoragePaths paths;
+  final AnimePluginManager _animePluginManager;
 
   Future<List<String>> getCharacters() async {
     if (!await paths.characterAssetsDirectory.exists()) {
@@ -117,9 +120,11 @@ class CharacterRepository {
     final List<String> characters = await paths.characterAssetsDirectory
         .list()
         .where((FileSystemEntity entity) => entity is Directory)
-        .map((FileSystemEntity entity) => entity.uri.pathSegments
-            .where((String segment) => segment.isNotEmpty)
-            .last)
+        .map(
+          (FileSystemEntity entity) => entity.uri.pathSegments
+              .where((String segment) => segment.isNotEmpty)
+              .last,
+        )
         .toList();
     characters.sort();
     return characters;
@@ -131,8 +136,10 @@ class CharacterRepository {
     }
 
     final String content = await paths.appIniFile.readAsString();
-    final RegExpMatch? match =
-        RegExp(r'^CharSelect=(.+)$', multiLine: true).firstMatch(content);
+    final RegExpMatch? match = RegExp(
+      r'^CharSelect=(.+)$',
+      multiLine: true,
+    ).firstMatch(content);
     if (match == null) {
       return 'test';
     }
@@ -165,8 +172,9 @@ class CharacterRepository {
   }
 
   Future<void> saveCharacterPrompt(String characterName, String prompt) async {
-    final CharacterAssetConfig current =
-        await loadCharacterAssetConfig(characterName);
+    final CharacterAssetConfig current = await loadCharacterAssetConfig(
+      characterName,
+    );
     await _writeJsonObject(
       paths.characterAssetConfigFile(characterName),
       current.copyWith(prompt: prompt).toJson(),
@@ -174,8 +182,9 @@ class CharacterRepository {
   }
 
   Future<void> saveTachieSize(String characterName, int size) async {
-    final CharacterRuntimeConfig current =
-        await loadCharacterRuntimeConfig(characterName);
+    final CharacterRuntimeConfig current = await loadCharacterRuntimeConfig(
+      characterName,
+    );
     await _writeJsonObject(
       paths.characterRuntimeConfigFile(characterName),
       current.copyWith(tachieSize: size).toJson(),
@@ -188,8 +197,9 @@ class CharacterRepository {
     required double offsetX,
     required double offsetY,
   }) async {
-    final CharacterRuntimeConfig current =
-        await loadCharacterRuntimeConfig(characterName);
+    final CharacterRuntimeConfig current = await loadCharacterRuntimeConfig(
+      characterName,
+    );
     await _writeJsonObject(
       paths.characterRuntimeConfigFile(characterName),
       current
@@ -203,16 +213,13 @@ class CharacterRepository {
   }
 
   Future<void> resetTachieTransform(String characterName) async {
-    final CharacterRuntimeConfig current =
-        await loadCharacterRuntimeConfig(characterName);
+    final CharacterRuntimeConfig current = await loadCharacterRuntimeConfig(
+      characterName,
+    );
     await _writeJsonObject(
       paths.characterRuntimeConfigFile(characterName),
       current
-          .copyWith(
-            tachieSize: 100,
-            tachieOffsetX: 0,
-            tachieOffsetY: 0,
-          )
+          .copyWith(tachieSize: 100, tachieOffsetX: 0, tachieOffsetY: 0)
           .toJson(),
     );
   }
@@ -221,20 +228,19 @@ class CharacterRepository {
     String characterName,
     LlmProviderType provider,
   ) async {
-    final CharacterRuntimeConfig current =
-        await loadCharacterRuntimeConfig(characterName);
+    final CharacterRuntimeConfig current = await loadCharacterRuntimeConfig(
+      characterName,
+    );
     await _writeJsonObject(
       paths.characterRuntimeConfigFile(characterName),
       current.copyWith(serverSelect: provider.configKey).toJson(),
     );
   }
 
-  Future<void> saveCharacterModel(
-    String characterName,
-    String modelId,
-  ) async {
-    final CharacterRuntimeConfig current =
-        await loadCharacterRuntimeConfig(characterName);
+  Future<void> saveCharacterModel(String characterName, String modelId) async {
+    final CharacterRuntimeConfig current = await loadCharacterRuntimeConfig(
+      characterName,
+    );
     await _writeJsonObject(
       paths.characterRuntimeConfigFile(characterName),
       current.copyWith(modelSelect: modelId).toJson(),
@@ -245,8 +251,9 @@ class CharacterRepository {
     String characterName,
     bool enabled,
   ) async {
-    final CharacterRuntimeConfig current =
-        await loadCharacterRuntimeConfig(characterName);
+    final CharacterRuntimeConfig current = await loadCharacterRuntimeConfig(
+      characterName,
+    );
     await _writeJsonObject(
       paths.characterRuntimeConfigFile(characterName),
       current.copyWith(vitsEnable: enabled).toJson(),
@@ -257,12 +264,90 @@ class CharacterRepository {
     String characterName,
     String modelAndSpeaker,
   ) async {
-    final CharacterRuntimeConfig current =
-        await loadCharacterRuntimeConfig(characterName);
+    final CharacterRuntimeConfig current = await loadCharacterRuntimeConfig(
+      characterName,
+    );
     await _writeJsonObject(
       paths.characterRuntimeConfigFile(characterName),
       current.copyWith(vitsMasSelect: modelAndSpeaker).toJson(),
     );
+  }
+
+  Future<void> saveTachieAnimationBinding(
+    String characterName,
+    String actionName,
+    String? animationUniqueKey,
+  ) async {
+    final CharacterRuntimeConfig current = await loadCharacterRuntimeConfig(
+      characterName,
+    );
+    final Map<String, String> map = Map<String, String>.from(
+      current.tachieAnimations,
+    );
+    final String trimmedAction = actionName.trim();
+    final String trimmedKey = (animationUniqueKey ?? '').trim();
+    if (trimmedAction.isEmpty) {
+      return;
+    }
+
+    if (trimmedKey.isEmpty) {
+      map.remove(trimmedAction);
+    } else {
+      map[trimmedAction] = trimmedKey;
+    }
+
+    await _writeJsonObject(
+      paths.characterRuntimeConfigFile(characterName),
+      current.copyWith(tachieAnimations: map).toJson(),
+    );
+  }
+
+  Future<AnimePluginRegistry> loadAnimePluginRegistry() async {
+    return _animePluginManager.reload(paths.animePluginDirectory);
+  }
+
+  Future<String> installAnimePluginFromFile(String sourceFilePath) async {
+    final AnimePluginDefinition plugin = await _animePluginManager
+        .parsePluginFile(sourceFilePath);
+    final AnimePluginRegistry registry = await loadAnimePluginRegistry();
+    for (final AnimePluginDefinition existPlugin in registry.plugins) {
+      if (existPlugin.name == plugin.name) {
+        throw CharacterImportException('插件名称重复: ${plugin.name}');
+      }
+    }
+
+    final String fileSafePluginName = plugin.name
+        .replaceAll(RegExp(r'[\\/:*?"<>|]+'), '_')
+        .trim();
+    if (fileSafePluginName.isEmpty) {
+      throw const CharacterImportException('插件名称无效');
+    }
+
+    final File targetFile = File(
+      p.join(paths.animePluginDirectory.path, '$fileSafePluginName.json'),
+    );
+    if (await targetFile.exists()) {
+      throw CharacterImportException('目标文件已存在: ${targetFile.path}');
+    }
+
+    await targetFile.parent.create(recursive: true);
+    await File(sourceFilePath).copy(targetFile.path);
+    return plugin.name;
+  }
+
+  Future<void> deleteAnimePluginByName(String pluginName) async {
+    final AnimePluginRegistry registry = await loadAnimePluginRegistry();
+    for (final AnimePluginDefinition plugin in registry.plugins) {
+      if (plugin.name == pluginName) {
+        final File pluginFile = File(plugin.filePath);
+        if (!await pluginFile.exists()) {
+          throw CharacterImportException('插件文件不存在: ${plugin.filePath}');
+        }
+        await pluginFile.delete();
+        return;
+      }
+    }
+    throw CharacterImportException('未找到插件: $pluginName');
   }
 
   Future<String> importCharacterArchive(
@@ -291,7 +376,9 @@ class CharacterRepository {
     }
 
     final String? sharedRoot = _detectSharedRoot(files);
-    final Directory targetDirectory = paths.characterAssetDirectory(characterName);
+    final Directory targetDirectory = paths.characterAssetDirectory(
+      characterName,
+    );
     if (await targetDirectory.exists()) {
       await targetDirectory.delete(recursive: true);
     }
@@ -348,17 +435,15 @@ class CharacterRepository {
     return names;
   }
 
-  Future<File?> resolveTachieFile(
-    String characterName,
-    String moodName,
-  ) async {
+  Future<File?> resolveTachieFile(String characterName, String moodName) async {
     final Directory directory = paths.characterTachieDirectory(characterName);
     if (!await directory.exists()) {
       return null;
     }
 
-    final String trimmedMood =
-        moodName.trim().isEmpty ? 'default' : moodName.trim();
+    final String trimmedMood = moodName.trim().isEmpty
+        ? 'default'
+        : moodName.trim();
     final List<FileSystemEntity> entries = await directory.list().toList();
 
     File? exactMatch;
@@ -377,8 +462,9 @@ class CharacterRepository {
       }
 
       final int dotIndex = fileName.lastIndexOf('.');
-      final String baseName =
-          dotIndex > 0 ? fileName.substring(0, dotIndex) : fileName;
+      final String baseName = dotIndex > 0
+          ? fileName.substring(0, dotIndex)
+          : fileName;
       if (baseName == trimmedMood) {
         exactMatch = entry;
       }
@@ -402,7 +488,9 @@ class CharacterRepository {
       );
     }
 
-    final File runtimeConfigFile = paths.characterRuntimeConfigFile(characterName);
+    final File runtimeConfigFile = paths.characterRuntimeConfigFile(
+      characterName,
+    );
     if (!await runtimeConfigFile.exists()) {
       await _writeJsonObject(
         runtimeConfigFile,
@@ -447,10 +535,7 @@ class CharacterRepository {
 }
 
 class ConversationRepository {
-  ConversationRepository(
-    this.paths,
-    this.characterRepository,
-  );
+  ConversationRepository(this.paths, this.characterRepository);
 
   final AppStoragePaths paths;
   final CharacterRepository characterRepository;
@@ -462,8 +547,8 @@ class ConversationRepository {
   }
 
   Future<String> buildUserMessageWithContext(String input) async {
-    final String selectedCharacter =
-        await characterRepository.getSelectedCharacter();
+    final String selectedCharacter = await characterRepository
+        .getSelectedCharacter();
     final ContextHistory history = await loadHistory(selectedCharacter);
     if (history.history.isEmpty) {
       return input;
@@ -487,8 +572,8 @@ class ConversationRepository {
   }
 
   Future<void> _appendLine(String line) async {
-    final String selectedCharacter =
-        await characterRepository.getSelectedCharacter();
+    final String selectedCharacter = await characterRepository
+        .getSelectedCharacter();
     final ContextHistory history = await loadHistory(selectedCharacter);
     final List<String> lines = List<String>.from(history.history)..add(line);
     await _writeJsonObject(
@@ -499,10 +584,7 @@ class ConversationRepository {
 }
 
 class _ArchiveImportEntry {
-  const _ArchiveImportEntry({
-    required this.file,
-    required this.pathSegments,
-  });
+  const _ArchiveImportEntry({required this.file, required this.pathSegments});
 
   final ArchiveFile file;
   final List<String> pathSegments;
