@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../controllers/chat_controller.dart';
 import '../models/app_models.dart';
+import '../models/anime_plugin_models.dart';
 
 class ConversationPage extends StatefulWidget {
   const ConversationPage({
@@ -27,6 +28,8 @@ class _ConversationPageState extends State<ConversationPage> {
   double _gestureStartScale = 1;
   bool _isManipulatingTachie = false;
   String _lastSyncedCharacter = '';
+  String _lastAnimationBindingKey = '';
+  AnimePluginAnimation? _activePluginAnimation;
 
   @override
   void initState() {
@@ -45,6 +48,7 @@ class _ConversationPageState extends State<ConversationPage> {
   void _onControllerChanged() {
     _syncInputController();
     _syncTachieTransform();
+    _syncPluginAnimation();
     if (mounted) {
       setState(() {});
     }
@@ -76,7 +80,8 @@ class _ConversationPageState extends State<ConversationPage> {
       return;
     }
 
-    final CharacterRuntimeConfig runtimeConfig = widget.controller.runtimeConfig;
+    final CharacterRuntimeConfig runtimeConfig =
+        widget.controller.runtimeConfig;
     final Offset nextOffset = Offset(
       runtimeConfig.tachieOffsetX,
       runtimeConfig.tachieOffsetY,
@@ -91,6 +96,28 @@ class _ConversationPageState extends State<ConversationPage> {
     _lastSyncedCharacter = widget.controller.selectedCharacter;
     _tachieOffset = nextOffset;
     _tachieScale = nextScale;
+  }
+
+  void _syncPluginAnimation() {
+    final ConversationController controller = widget.controller;
+    final String actionName = controller.currentMood.trim().isEmpty
+        ? 'default'
+        : controller.currentMood.trim();
+    final String uniqueKey =
+        controller.runtimeConfig.tachieAnimations[actionName] ?? '';
+    final AnimePluginAnimation? animation = uniqueKey.isEmpty
+        ? null
+        : controller.animePluginRegistry
+              .tryGetAnimationByUniqueKey(uniqueKey)
+              ?.animation;
+    final String nextBindingKey =
+        '${controller.currentTachieFile?.path ?? ''}|$actionName|$uniqueKey';
+    if (_lastAnimationBindingKey == nextBindingKey) {
+      return;
+    }
+
+    _lastAnimationBindingKey = nextBindingKey;
+    _activePluginAnimation = animation;
   }
 
   void _handleTachieScaleStart(ScaleStartDetails details) {
@@ -123,11 +150,9 @@ class _ConversationPageState extends State<ConversationPage> {
   }
 
   Future<void> _openSettings() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: widget.settingsPageBuilder,
-      ),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: widget.settingsPageBuilder));
     await widget.controller.reload();
   }
 
@@ -141,9 +166,7 @@ class _ConversationPageState extends State<ConversationPage> {
         if (entries.isEmpty) {
           return const SizedBox(
             height: 240,
-            child: Center(
-              child: Text('还没有历史记录'),
-            ),
+            child: Center(child: Text('还没有历史记录')),
           );
         }
 
@@ -162,8 +185,9 @@ class _ConversationPageState extends State<ConversationPage> {
                 HistorySpeaker.system => '记录',
               };
               return Align(
-                alignment:
-                    isUser ? Alignment.centerRight : Alignment.centerLeft,
+                alignment: isUser
+                    ? Alignment.centerRight
+                    : Alignment.centerLeft,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 320),
                   child: DecoratedBox(
@@ -257,6 +281,7 @@ class _ConversationPageState extends State<ConversationPage> {
                                       ),
                                       file: controller.currentTachieFile,
                                       scale: _tachieScale,
+                                      pluginAnimation: _activePluginAnimation,
                                     ),
                                   ),
                                 ),
@@ -317,8 +342,8 @@ class _DialogPanel extends StatelessWidget {
     final String hintText = showContinueButton
         ? '点击继续'
         : isSending
-            ? ''
-            : '说点什么吧';
+        ? ''
+        : '说点什么吧';
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -354,9 +379,7 @@ class _DialogPanel extends StatelessWidget {
                   onSubmitted: (_) => onSubmitted(),
                   decoration: InputDecoration(
                     hintText: hintText,
-                    hintStyle: const TextStyle(
-                      color: Color(0x8A2F241E),
-                    ),
+                    hintStyle: const TextStyle(color: Color(0x8A2F241E)),
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
@@ -404,11 +427,13 @@ class _TachieDisplay extends StatelessWidget {
   const _TachieDisplay({
     required this.file,
     required this.scale,
+    required this.pluginAnimation,
     super.key,
   });
 
   final File? file;
   final double scale;
+  final AnimePluginAnimation? pluginAnimation;
 
   @override
   Widget build(BuildContext context) {
@@ -418,13 +443,157 @@ class _TachieDisplay extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: AnimatedScale(
-        scale: scale,
-        duration: const Duration(milliseconds: 220),
+      child: _PluginAnimatedTachie(
+        baseScale: scale,
+        pluginAnimation: pluginAnimation,
         child: Image.file(
           file!,
           fit: BoxFit.contain,
           errorBuilder: (_, _, _) => const _TachiePlaceholder(),
+        ),
+      ),
+    );
+  }
+}
+
+class _PluginAnimatedTachie extends StatefulWidget {
+  const _PluginAnimatedTachie({
+    required this.baseScale,
+    required this.pluginAnimation,
+    required this.child,
+  });
+
+  final double baseScale;
+  final AnimePluginAnimation? pluginAnimation;
+  final Widget child;
+
+  @override
+  State<_PluginAnimatedTachie> createState() => _PluginAnimatedTachieState();
+}
+
+class _PluginAnimatedTachieState extends State<_PluginAnimatedTachie> {
+  static const Duration _defaultDuration = Duration(milliseconds: 220);
+
+  TachieAnimatedTransform _transform = const TachieAnimatedTransform();
+  Duration _duration = _defaultDuration;
+  int _token = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _startSequence();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PluginAnimatedTachie oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.pluginAnimation != widget.pluginAnimation) {
+      _startSequence();
+    }
+  }
+
+  void _startSequence() {
+    _token += 1;
+    final int myToken = _token;
+    setState(() {
+      _transform = const TachieAnimatedTransform();
+      _duration = _defaultDuration;
+    });
+
+    final AnimePluginAnimation? animation = widget.pluginAnimation;
+    if (animation == null || animation.steps.isEmpty) {
+      return;
+    }
+
+    Future<void>(() async {
+      for (final AnimePluginStep step in animation.steps) {
+        if (!mounted || myToken != _token) {
+          return;
+        }
+
+        final int ms = (step.duration * 1000).round().clamp(1, 30000);
+        final Duration stepDuration = Duration(milliseconds: ms);
+
+        switch (step.type) {
+          case AnimePluginStepType.move:
+            setState(() {
+              _duration = stepDuration;
+              _transform = _transform.copyWith(
+                //move按上一步累加位移
+                offset: _transform.offset + Offset(step.x ?? 0, step.y ?? 0),
+              );
+            });
+            break;
+          case AnimePluginStepType.opacity:
+            setState(() {
+              _duration = Duration.zero;
+              _transform = _transform.copyWith(
+                opacity: step.from ?? _transform.opacity,
+              );
+            });
+            await Future<void>.delayed(const Duration(milliseconds: 1));
+            if (!mounted || myToken != _token) {
+              return;
+            }
+            setState(() {
+              _duration = stepDuration;
+              _transform = _transform.copyWith(
+                opacity: step.to ?? _transform.opacity,
+              );
+            });
+            break;
+          case AnimePluginStepType.scale:
+            setState(() {
+              _duration = Duration.zero;
+              _transform = _transform.copyWith(
+                scale: step.from ?? _transform.scale,
+              );
+            });
+            await Future<void>.delayed(const Duration(milliseconds: 1));
+            if (!mounted || myToken != _token) {
+              return;
+            }
+            setState(() {
+              _duration = stepDuration;
+              _transform = _transform.copyWith(
+                scale: step.to ?? _transform.scale,
+              );
+            });
+            break;
+        }
+
+        await Future<void>.delayed(stepDuration);
+      }
+
+      if (!mounted || myToken != _token) {
+        return;
+      }
+      setState(() {
+        _duration = const Duration(milliseconds: 180);
+        _transform = const TachieAnimatedTransform();
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Matrix4 translate = Matrix4.identity()
+      ..translate(_transform.offset.dx, _transform.offset.dy);
+
+    return AnimatedContainer(
+      duration: _duration,
+      curve: Curves.linear,
+      transform: translate,
+      child: AnimatedOpacity(
+        duration: _duration,
+        curve: Curves.linear,
+        opacity: _transform.opacity.clamp(0, 1).toDouble(),
+        child: AnimatedScale(
+          duration: _duration,
+          curve: Curves.linear,
+          alignment: Alignment.center,
+          scale: widget.baseScale * _transform.scale,
+          child: widget.child,
         ),
       ),
     );
@@ -452,4 +621,3 @@ class _TachiePlaceholder extends StatelessWidget {
     );
   }
 }
-
