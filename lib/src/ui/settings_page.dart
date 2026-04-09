@@ -1,8 +1,15 @@
 ﻿import 'dart:io';
 import 'dart:typed_data';
+import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import 'package:open_filex/open_filex.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/app_models.dart';
 import '../models/anime_plugin_models.dart';
@@ -89,6 +96,20 @@ class SettingsPage extends StatelessWidget {
               );
             },
           ),
+          _SettingsEntry(
+            title: '关于',
+            subtitle: '版本信息、更新检查、项目链接',
+            icon: Icons.info_outline_rounded,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => AboutPage(
+                    characterRepository: characterRepository,
+                  ),
+                ),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -102,6 +123,507 @@ class PluginSettingsPage extends StatefulWidget {
 
   @override
   State<PluginSettingsPage> createState() => _PluginSettingsPageState();
+}
+
+class AboutPage extends StatefulWidget {
+  const AboutPage({
+    required this.characterRepository,
+    super.key,
+  });
+
+  final CharacterRepository characterRepository;
+
+  @override
+  State<AboutPage> createState() => _AboutPageState();
+}
+
+class _AboutPageState extends State<AboutPage> {
+  static final Uri _repoUri =
+      Uri.parse('https://github.com/Zao-chen/ZcChat2ForMobile');
+  static final Uri _issueUri =
+      Uri.parse('https://github.com/Zao-chen/ZcChat2ForMobile/issues/new/choose');
+  static final Uri _releaseApiUri =
+      Uri.parse('https://api.github.com/repos/Zao-chen/ZcChat2ForMobile/releases');
+
+  bool _isLoading = true;
+  bool _isCheckingUpdate = false;
+  bool _isDownloadingApk = false;
+  bool _downloadProgressKnown = false;
+  double _downloadProgress = 0;
+  String _appVersion = '0.0.0';
+  String? _latestTagName;
+  Uri? _latestReleaseUrl;
+  Uri? _latestApkUrl;
+  String? _statusText;
+  String? _errorText;
+  List<_ReleaseInfo> _releases = const <_ReleaseInfo>[];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    await _loadVersion();
+    await _checkUpdate();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _loadVersion() async {
+    final PackageInfo info = await PackageInfo.fromPlatform();
+    _appVersion = _normalizeVersion(info.version);
+  }
+
+  Future<void> _checkUpdate() async {
+    if (mounted) {
+      setState(() {
+        _isCheckingUpdate = true;
+        _errorText = null;
+      });
+    }
+
+    try {
+      final http.Response response = await http.get(_releaseApiUri);
+      if (response.statusCode != 200) {
+        throw Exception('请求失败(${response.statusCode})');
+      }
+
+      final Object? decoded = jsonDecode(response.body);
+      if (decoded is! List) {
+        throw const FormatException('更新数据格式错误');
+      }
+
+      final List<_ReleaseInfo> releaseList = <_ReleaseInfo>[];
+      bool matchedCurrentVersion = false;
+      for (final Object item in decoded) {
+        if (item is! Map) {
+          continue;
+        }
+        final Map<dynamic, dynamic> rawMap = item;
+        final String tagName =
+            _normalizeVersion(rawMap['tag_name']?.toString() ?? '');
+        final String name = (rawMap['name']?.toString() ?? '').trim();
+        final String publishedAtRaw = rawMap['published_at']?.toString() ?? '';
+        final String publishedDate =
+            publishedAtRaw.length >= 10 ? publishedAtRaw.substring(0, 10) : '';
+        final String htmlUrl = rawMap['html_url']?.toString() ?? '';
+        final List<String> nameTokens = name.split(' ');
+        final String firstToken = nameTokens.isEmpty ? '' : nameTokens.first;
+        final String versionText = tagName.isNotEmpty
+            ? tagName
+          : _normalizeVersion(firstToken);
+        final bool isCurrentVersion =
+            !matchedCurrentVersion && versionText == _appVersion;
+        if (isCurrentVersion) {
+          matchedCurrentVersion = true;
+        }
+        releaseList.add(
+          _ReleaseInfo(
+            version: versionText,
+            title: name.isEmpty ? versionText : name,
+            date: publishedDate,
+            isCurrent: isCurrentVersion,
+            htmlUrl: htmlUrl,
+          ),
+        );
+      }
+
+      Uri? latestUrl;
+      Uri? latestApkUrl;
+      String? latestTag;
+      if (releaseList.isNotEmpty && decoded.first is Map) {
+        latestTag = releaseList.first.version;
+        if (releaseList.first.htmlUrl.isNotEmpty) {
+          latestUrl = Uri.tryParse(releaseList.first.htmlUrl);
+        }
+        final Map<dynamic, dynamic> firstRelease = decoded.first as Map<dynamic, dynamic>;
+        final Object? assetsObj = firstRelease['assets'];
+        if (assetsObj is List) {
+          for (final Object assetObj in assetsObj) {
+            if (assetObj is! Map) {
+              continue;
+            }
+            final String assetName = (assetObj['name']?.toString() ?? '').toLowerCase();
+            if (!assetName.endsWith('.apk')) {
+              continue;
+            }
+            final String url = assetObj['browser_download_url']?.toString() ?? '';
+            if (url.isEmpty) {
+              continue;
+            }
+            latestApkUrl = Uri.tryParse(url);
+            break;
+          }
+        }
+      }
+
+      final String statusText;
+      if (latestTag == null || latestTag.isEmpty) {
+        statusText = '获取新版本失败';
+      } else if (latestTag != _appVersion) {
+        statusText = '发现新版本 v$latestTag';
+      } else {
+        statusText = '当前为最新正式版';
+      }
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _releases = releaseList;
+        _latestTagName = latestTag;
+        _latestReleaseUrl = latestUrl;
+        _latestApkUrl = latestApkUrl;
+        _statusText = statusText;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorText = '更新检查失败: $error';
+        _statusText = '获取新版本失败';
+      });
+    } finally {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isCheckingUpdate = false;
+      });
+    }
+  }
+
+  String _normalizeVersion(String version) {
+    final String trimmed = version.trim();
+    if (trimmed.toLowerCase().startsWith('v')) {
+      return trimmed.substring(1);
+    }
+    return trimmed;
+  }
+
+  Future<void> _openUrl(Uri uri) async {
+    final bool launched = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('无法打开链接: $uri')),
+      );
+    }
+  }
+
+  Future<void> _openLogPath() async {
+    final File logFile = File(
+      '${widget.characterRepository.paths.rootDirectory.path}${Platform.pathSeparator}log.txt',
+    );
+    if (await logFile.exists()) {
+      await _openUrl(Uri.file(logFile.path));
+      return;
+    }
+
+    await Clipboard.setData(ClipboardData(text: logFile.path));
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('日志文件不存在，路径已复制: ${logFile.path}')),
+    );
+  }
+
+  Future<void> _onUpdateButtonPressed() async {
+    final bool hasNewVersion =
+        _latestTagName != null && _latestTagName!.isNotEmpty && _latestTagName != _appVersion;
+    if (hasNewVersion && _latestApkUrl != null) {
+      await _downloadAndInstallLatestApk();
+      return;
+    }
+    if (hasNewVersion && _latestReleaseUrl != null) {
+      await _openUrl(_latestReleaseUrl!);
+      return;
+    }
+    await _checkUpdate();
+  }
+
+  Future<void> _downloadAndInstallLatestApk() async {
+    if (_latestApkUrl == null || _isDownloadingApk) {
+      return;
+    }
+
+    setState(() {
+      _isDownloadingApk = true;
+      _downloadProgressKnown = false;
+      _downloadProgress = 0;
+      _errorText = null;
+    });
+
+    final http.Client client = http.Client();
+    IOSink? sink;
+    try {
+      final http.Request request = http.Request('GET', _latestApkUrl!);
+      final http.StreamedResponse response = await client.send(request);
+      if (response.statusCode != 200) {
+        throw Exception('下载失败(${response.statusCode})');
+      }
+
+      final int total = response.contentLength ?? 0;
+      final String apkName = _latestApkUrl!.pathSegments.isEmpty
+          ? 'zcchat2_update.apk'
+          : _latestApkUrl!.pathSegments.last;
+
+      final Directory saveDirectory;
+      if (Platform.isAndroid) {
+        saveDirectory = await getExternalStorageDirectory() ?? await getTemporaryDirectory();
+      } else {
+        saveDirectory = await getTemporaryDirectory();
+      }
+      await saveDirectory.create(recursive: true);
+      final File apkFile = File(
+        '${saveDirectory.path}${Platform.pathSeparator}$apkName',
+      );
+      sink = apkFile.openWrite();
+
+      int received = 0;
+      await for (final List<int> chunk in response.stream) {
+        sink.add(chunk);
+        received += chunk.length;
+        if (!mounted) {
+          continue;
+        }
+        if (total > 0) {
+          setState(() {
+            _downloadProgressKnown = true;
+            _downloadProgress = (received / total).clamp(0, 1);
+          });
+        }
+      }
+      await sink.flush();
+      await sink.close();
+      sink = null;
+
+      final OpenResult result = await OpenFilex.open(apkFile.path);
+      if (!mounted) {
+        return;
+      }
+      if (result.type != ResultType.done) {
+        setState(() {
+          _errorText = '安装器启动失败: ${result.message}';
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _errorText = '下载失败: $error';
+        });
+      }
+    } finally {
+      if (sink != null) {
+        await sink.close();
+      }
+      client.close();
+      if (mounted) {
+        setState(() {
+          _isDownloadingApk = false;
+          _downloadProgressKnown = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final bool hasNewVersion =
+        _latestTagName != null && _latestTagName!.isNotEmpty && _latestTagName != _appVersion;
+    final String updateButtonText = _isDownloadingApk
+      ? (_downloadProgressKnown
+        ? '下载中 ${(100 * _downloadProgress).toStringAsFixed(0)}%'
+        : '下载中...')
+      : hasNewVersion
+        ? (_latestApkUrl != null
+          ? '发现新版本 v$_latestTagName（下载APK）'
+          : '发现新版本 v$_latestTagName')
+        : (_statusText ?? '检查更新');
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('关于'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Text(
+                'ZcChat2',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'v$_appVersion',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text('一个模仿 Galgame 演出效果的 AI 桌宠'),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              FilledButton.tonalIcon(
+                onPressed: () => _openUrl(_repoUri),
+                icon: const Icon(Icons.code_rounded),
+                label: const Text('GitHub'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: () => _openUrl(_issueUri),
+                icon: const Icon(Icons.bug_report_outlined),
+                label: const Text('Issue'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: _openLogPath,
+                icon: const Icon(Icons.description_outlined),
+                label: const Text('软件日志'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: (_isCheckingUpdate || _isDownloadingApk)
+                ? null
+                : _onUpdateButtonPressed,
+            icon: (_isCheckingUpdate || _isDownloadingApk)
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.system_update_alt_rounded),
+            label: Text(updateButtonText),
+          ),
+          if (_isCheckingUpdate) ...<Widget>[
+            const SizedBox(height: 8),
+            const LinearProgressIndicator(),
+          ],
+          if (_isDownloadingApk) ...<Widget>[
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: _downloadProgressKnown ? _downloadProgress : null,
+            ),
+          ],
+          if (_errorText != null) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              _errorText!,
+              style: const TextStyle(color: Colors.redAccent),
+            ),
+          ],
+          const SizedBox(height: 18),
+          Text(
+            '更新日志',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          if (_releases.isEmpty)
+            const Text('暂无可展示的发布记录')
+          else
+            Table(
+              columnWidths: const <int, TableColumnWidth>{
+                0: FixedColumnWidth(44),
+                1: FixedColumnWidth(76),
+                2: FixedColumnWidth(96),
+                3: FlexColumnWidth(),
+              },
+              border: TableBorder(
+                horizontalInside: BorderSide(
+                  color: Color(0x1A000000),
+                  width: 1,
+                ),
+              ),
+              defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+              children: <TableRow>[
+                const TableRow(
+                  children: <Widget>[
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text('状态'),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text('版本'),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text('日期'),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text('标题'),
+                    ),
+                  ],
+                ),
+                ..._releases.map(
+                  (_ReleaseInfo item) => TableRow(
+                    children: <Widget>[
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(item.isCurrent ? '■' : '□'),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(item.version),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(item.date),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(
+                          item.title,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReleaseInfo {
+  const _ReleaseInfo({
+    required this.version,
+    required this.title,
+    required this.date,
+    required this.isCurrent,
+    required this.htmlUrl,
+  });
+
+  final String version;
+  final String title;
+  final String date;
+  final bool isCurrent;
+  final String htmlUrl;
 }
 
 class _PluginSettingsPageState extends State<PluginSettingsPage> {
