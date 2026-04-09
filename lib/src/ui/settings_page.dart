@@ -103,9 +103,8 @@ class SettingsPage extends StatelessWidget {
             onTap: () {
               Navigator.of(context).push(
                 MaterialPageRoute<void>(
-                  builder: (_) => AboutPage(
-                    characterRepository: characterRepository,
-                  ),
+                  builder: (_) =>
+                      AboutPage(characterRepository: characterRepository),
                 ),
               );
             },
@@ -126,10 +125,7 @@ class PluginSettingsPage extends StatefulWidget {
 }
 
 class AboutPage extends StatefulWidget {
-  const AboutPage({
-    required this.characterRepository,
-    super.key,
-  });
+  const AboutPage({required this.characterRepository, super.key});
 
   final CharacterRepository characterRepository;
 
@@ -138,12 +134,15 @@ class AboutPage extends StatefulWidget {
 }
 
 class _AboutPageState extends State<AboutPage> {
-  static final Uri _repoUri =
-      Uri.parse('https://github.com/Zao-chen/ZcChat2ForMobile');
-  static final Uri _issueUri =
-      Uri.parse('https://github.com/Zao-chen/ZcChat2ForMobile/issues/new/choose');
-  static final Uri _releaseApiUri =
-      Uri.parse('https://api.github.com/repos/Zao-chen/ZcChat2ForMobile/releases');
+  static final Uri _repoUri = Uri.parse(
+    'https://github.com/Zao-chen/ZcChat2ForMobile',
+  );
+  static final Uri _issueUri = Uri.parse(
+    'https://github.com/Zao-chen/ZcChat2ForMobile/issues/new/choose',
+  );
+  static final Uri _releaseApiUri = Uri.parse(
+    'https://api.github.com/repos/Zao-chen/ZcChat2ForMobile/releases',
+  );
 
   bool _isLoading = true;
   bool _isCheckingUpdate = false;
@@ -206,18 +205,20 @@ class _AboutPageState extends State<AboutPage> {
           continue;
         }
         final Map<dynamic, dynamic> rawMap = item;
-        final String tagName =
-            _normalizeVersion(rawMap['tag_name']?.toString() ?? '');
+        final String tagName = _normalizeVersion(
+          rawMap['tag_name']?.toString() ?? '',
+        );
         final String name = (rawMap['name']?.toString() ?? '').trim();
         final String publishedAtRaw = rawMap['published_at']?.toString() ?? '';
-        final String publishedDate =
-            publishedAtRaw.length >= 10 ? publishedAtRaw.substring(0, 10) : '';
+        final String publishedDate = publishedAtRaw.length >= 10
+            ? publishedAtRaw.substring(0, 10)
+            : '';
         final String htmlUrl = rawMap['html_url']?.toString() ?? '';
         final List<String> nameTokens = name.split(' ');
         final String firstToken = nameTokens.isEmpty ? '' : nameTokens.first;
         final String versionText = tagName.isNotEmpty
             ? tagName
-          : _normalizeVersion(firstToken);
+            : _normalizeVersion(firstToken);
         final bool isCurrentVersion =
             !matchedCurrentVersion && versionText == _appVersion;
         if (isCurrentVersion) {
@@ -242,18 +243,21 @@ class _AboutPageState extends State<AboutPage> {
         if (releaseList.first.htmlUrl.isNotEmpty) {
           latestUrl = Uri.tryParse(releaseList.first.htmlUrl);
         }
-        final Map<dynamic, dynamic> firstRelease = decoded.first as Map<dynamic, dynamic>;
+        final Map<dynamic, dynamic> firstRelease =
+            decoded.first as Map<dynamic, dynamic>;
         final Object? assetsObj = firstRelease['assets'];
         if (assetsObj is List) {
           for (final Object assetObj in assetsObj) {
             if (assetObj is! Map) {
               continue;
             }
-            final String assetName = (assetObj['name']?.toString() ?? '').toLowerCase();
+            final String assetName = (assetObj['name']?.toString() ?? '')
+                .toLowerCase();
             if (!assetName.endsWith('.apk')) {
               continue;
             }
-            final String url = assetObj['browser_download_url']?.toString() ?? '';
+            final String url =
+                assetObj['browser_download_url']?.toString() ?? '';
             if (url.isEmpty) {
               continue;
             }
@@ -314,9 +318,9 @@ class _AboutPageState extends State<AboutPage> {
       mode: LaunchMode.externalApplication,
     );
     if (!launched && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('无法打开链接: $uri')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('无法打开链接: $uri')));
     }
   }
 
@@ -333,14 +337,16 @@ class _AboutPageState extends State<AboutPage> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('日志文件不存在，路径已复制: ${logFile.path}')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('日志文件不存在，路径已复制: ${logFile.path}')));
   }
 
   Future<void> _onUpdateButtonPressed() async {
     final bool hasNewVersion =
-        _latestTagName != null && _latestTagName!.isNotEmpty && _latestTagName != _appVersion;
+        _latestTagName != null &&
+        _latestTagName!.isNotEmpty &&
+        _latestTagName != _appVersion;
     if (hasNewVersion && _latestApkUrl != null) {
       await _downloadAndInstallLatestApk();
       return;
@@ -380,7 +386,9 @@ class _AboutPageState extends State<AboutPage> {
 
       final Directory saveDirectory;
       if (Platform.isAndroid) {
-        saveDirectory = await getExternalStorageDirectory() ?? await getTemporaryDirectory();
+        saveDirectory =
+            await getExternalStorageDirectory() ??
+            await getTemporaryDirectory();
       } else {
         saveDirectory = await getTemporaryDirectory();
       }
@@ -440,36 +448,31 @@ class _AboutPageState extends State<AboutPage> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     final bool hasNewVersion =
-        _latestTagName != null && _latestTagName!.isNotEmpty && _latestTagName != _appVersion;
+        _latestTagName != null &&
+        _latestTagName!.isNotEmpty &&
+        _latestTagName != _appVersion;
     final String updateButtonText = _isDownloadingApk
-      ? (_downloadProgressKnown
-        ? '下载中 ${(100 * _downloadProgress).toStringAsFixed(0)}%'
-        : '下载中...')
-      : hasNewVersion
+        ? (_downloadProgressKnown
+              ? '下载中 ${(100 * _downloadProgress).toStringAsFixed(0)}%'
+              : '下载中...')
+        : hasNewVersion
         ? (_latestApkUrl != null
-          ? '发现新版本 v$_latestTagName（下载APK）'
-          : '发现新版本 v$_latestTagName')
+              ? '发现新版本 v$_latestTagName（下载APK）'
+              : '发现新版本 v$_latestTagName')
         : (_statusText ?? '检查更新');
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('关于'),
-      ),
+      appBar: AppBar(title: const Text('关于')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
           Row(
             children: <Widget>[
-              Text(
-                'ZcChat2',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
+              Text('ZcChat2', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(width: 8),
               Text(
                 'v$_appVersion',
@@ -527,16 +530,10 @@ class _AboutPageState extends State<AboutPage> {
           ],
           if (_errorText != null) ...<Widget>[
             const SizedBox(height: 8),
-            Text(
-              _errorText!,
-              style: const TextStyle(color: Colors.redAccent),
-            ),
+            Text(_errorText!, style: const TextStyle(color: Colors.redAccent)),
           ],
           const SizedBox(height: 18),
-          Text(
-            '更新日志',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text('更新日志', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           if (_releases.isEmpty)
             const Text('暂无可展示的发布记录')
