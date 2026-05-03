@@ -168,6 +168,62 @@ class ConversationController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> editHistoryEntry(int index, String newText) async {
+    await conversationRepository.updateLine(index, newText);
+    history = await conversationRepository.loadHistory(selectedCharacter);
+    notifyListeners();
+  }
+
+  Future<void> deleteHistoryEntry(int index) async {
+    await conversationRepository.deleteLine(index);
+    history = await conversationRepository.loadHistory(selectedCharacter);
+    notifyListeners();
+  }
+
+  /// 回退到指定位置：保留 index 之前的所有记录，删除 index 及之后的所有记录。
+  Future<void> rollbackHistoryTo(int index) async {
+    await conversationRepository.rollbackTo(index);
+    history = await conversationRepository.loadHistory(selectedCharacter);
+    notifyListeners();
+  }
+
+  /// 撤销最后一轮对话（移除最后一条用户消息和角色回复）。
+  /// 如果最后一条是角色回复，则同时删除它和它前面的用户消息。
+  Future<void> undoLastTurn() async {
+    final List<HistoryEntry> entries = history.entries;
+    if (entries.isEmpty) {
+      return;
+    }
+
+    int removeCount = 0;
+    // 从末尾往前找：如果最后一条是角色，则删除角色+用户（一轮）；否则只删最后一条
+    for (int i = entries.length - 1; i >= 0; i -= 1) {
+      if (entries[i].speaker == HistorySpeaker.role) {
+        removeCount = entries.length - i + (i > 0 ? 1 : 1);
+        break;
+      }
+      if (entries[i].speaker == HistorySpeaker.user) {
+        removeCount = 1;
+        break;
+      }
+      removeCount = 1;
+    }
+
+    final int keepIndex = (entries.length - removeCount).clamp(
+      0,
+      entries.length,
+    );
+    await conversationRepository.rollbackTo(keepIndex);
+    history = await conversationRepository.loadHistory(selectedCharacter);
+    notifyListeners();
+  }
+
+  Future<void> clearHistory() async {
+    await conversationRepository.clearHistory();
+    history = await conversationRepository.loadHistory(selectedCharacter);
+    notifyListeners();
+  }
+
   Future<void> saveTachieTransform({
     required double scale,
     required Offset offset,

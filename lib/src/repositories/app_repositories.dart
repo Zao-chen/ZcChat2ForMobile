@@ -571,13 +571,70 @@ class ConversationRepository {
     );
   }
 
+  Future<void> updateLine(int index, String newText) async {
+    final String selectedCharacter = await characterRepository
+        .getSelectedCharacter();
+    final ContextHistory history = await loadHistory(selectedCharacter);
+    final List<String> lines = List<String>.from(history.history);
+    if (index < 0 || index >= lines.length) {
+      return;
+    }
+
+    final HistoryEntry originalEntry = HistoryEntry.fromRawLine(lines[index]);
+    final HistoryEntry updatedEntry = HistoryEntry(
+      speaker: originalEntry.speaker,
+      text: newText,
+    );
+    lines[index] = updatedEntry.toRawLine();
+    await _saveHistory(selectedCharacter, lines);
+  }
+
+  Future<void> deleteLine(int index) async {
+    final String selectedCharacter = await characterRepository
+        .getSelectedCharacter();
+    final ContextHistory history = await loadHistory(selectedCharacter);
+    final List<String> lines = List<String>.from(history.history);
+    if (index < 0 || index >= lines.length) {
+      return;
+    }
+    lines.removeAt(index);
+    await _saveHistory(selectedCharacter, lines);
+  }
+
+  /// 回退到指定位置：保留 [0, index) 的记录，删除 index 及之后的所有记录。
+  Future<void> rollbackTo(int index) async {
+    final String selectedCharacter = await characterRepository
+        .getSelectedCharacter();
+    final ContextHistory history = await loadHistory(selectedCharacter);
+    final List<String> lines = List<String>.from(history.history);
+    if (index <= 0) {
+      await _saveHistory(selectedCharacter, <String>[]);
+      return;
+    }
+    if (index >= lines.length) {
+      return;
+    }
+    final List<String> kept = lines.sublist(0, index);
+    await _saveHistory(selectedCharacter, kept);
+  }
+
+  Future<void> clearHistory() async {
+    final String selectedCharacter = await characterRepository
+        .getSelectedCharacter();
+    await _saveHistory(selectedCharacter, <String>[]);
+  }
+
   Future<void> _appendLine(String line) async {
     final String selectedCharacter = await characterRepository
         .getSelectedCharacter();
     final ContextHistory history = await loadHistory(selectedCharacter);
     final List<String> lines = List<String>.from(history.history)..add(line);
+    await _saveHistory(selectedCharacter, lines);
+  }
+
+  Future<void> _saveHistory(String characterName, List<String> lines) async {
     await _writeJsonObject(
-      paths.characterContextFile(selectedCharacter),
+      paths.characterContextFile(characterName),
       ContextHistory(history: lines).toJson(),
     );
   }

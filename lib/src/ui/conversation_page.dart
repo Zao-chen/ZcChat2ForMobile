@@ -161,8 +161,9 @@ class _ConversationPageState extends State<ConversationPage> {
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (BuildContext context) {
-        final List<HistoryEntry> entries = widget.controller.history.entries;
+      builder: (BuildContext sheetContext) {
+        final ConversationController controller = widget.controller;
+        final List<HistoryEntry> entries = controller.history.entries;
         if (entries.isEmpty) {
           return const SizedBox(
             height: 240,
@@ -171,57 +172,319 @@ class _ConversationPageState extends State<ConversationPage> {
         }
 
         return SizedBox(
-          height: MediaQuery.of(context).size.height * 0.65,
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-            itemCount: entries.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 12),
-            itemBuilder: (BuildContext context, int index) {
-              final HistoryEntry entry = entries[index];
-              final bool isUser = entry.speaker == HistorySpeaker.user;
-              final String speakerName = switch (entry.speaker) {
-                HistorySpeaker.user => '用户',
-                HistorySpeaker.role => widget.controller.selectedCharacter,
-                HistorySpeaker.system => '记录',
-              };
-              return Align(
-                alignment: isUser
-                    ? Alignment.centerRight
-                    : Alignment.centerLeft,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 320),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: isUser
-                          ? const Color(0xFFF4C7A1)
-                          : const Color(0xFFFFFFFF),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            speakerName,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF7C2D12),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(entry.text),
-                        ],
+          height: MediaQuery.of(sheetContext).size.height * 0.7,
+          child: Column(
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 12, 4),
+                child: Row(
+                  children: <Widget>[
+                    Text(
+                      '历史记录（${entries.length} 条）',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF7C2D12),
                       ),
                     ),
-                  ),
+                    const Spacer(),
+                    _SheetIconButton(
+                      icon: Icons.undo_rounded,
+                      tooltip: '撤销最后一轮',
+                      onTap: () => _confirmUndoLastTurn(sheetContext),
+                    ),
+                    const SizedBox(width: 4),
+                    _SheetIconButton(
+                      icon: Icons.delete_sweep_rounded,
+                      tooltip: '清空全部',
+                      onTap: () => _confirmClearHistory(sheetContext),
+                    ),
+                  ],
                 ),
-              );
-            },
+              ),
+              const Divider(indent: 20, endIndent: 20),
+              Expanded(
+                child: ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+                  itemCount: entries.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (BuildContext context, int index) {
+                    final HistoryEntry entry = entries[index];
+                    final bool isUser = entry.speaker == HistorySpeaker.user;
+                    final String speakerName = switch (entry.speaker) {
+                      HistorySpeaker.user => '用户',
+                      HistorySpeaker.role => controller.selectedCharacter,
+                      HistorySpeaker.system => '记录',
+                    };
+                    return Align(
+                      alignment: isUser
+                          ? Alignment.centerRight
+                          : Alignment.centerLeft,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 360),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: isUser
+                                ? const Color(0xFFF4C7A1)
+                                : const Color(0xFFFFFFFF),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Row(
+                                  children: <Widget>[
+                                    Expanded(
+                                      child: Text(
+                                        speakerName,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 13,
+                                          color: Color(0xFF7C2D12),
+                                        ),
+                                      ),
+                                    ),
+                                    _SheetIconButton(
+                                      icon: Icons.edit_outlined,
+                                      tooltip: '修改',
+                                      size: 18,
+                                      onTap: () =>
+                                          _showEditDialog(sheetContext, index),
+                                    ),
+                                    _SheetIconButton(
+                                      icon: Icons.delete_outline_rounded,
+                                      tooltip: '删除',
+                                      size: 18,
+                                      onTap: () => _confirmDeleteEntry(
+                                        sheetContext,
+                                        index,
+                                      ),
+                                    ),
+                                    _SheetIconButton(
+                                      icon: Icons.reply_rounded,
+                                      tooltip: '回退到此',
+                                      size: 18,
+                                      onTap: () => _confirmRollbackTo(
+                                        sheetContext,
+                                        index,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(entry.text),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         );
       },
     );
+  }
+
+  Future<void> _showEditDialog(BuildContext sheetContext, int index) async {
+    final ConversationController controller = widget.controller;
+    final HistoryEntry entry = controller.history.entries[index];
+    final TextEditingController editController = TextEditingController(
+      text: entry.text,
+    );
+
+    final bool? confirmed = await showDialog<bool>(
+      context: sheetContext,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('修改记录'),
+          content: TextField(
+            controller: editController,
+            maxLines: 5,
+            minLines: 2,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: '输入修改后的内容',
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      final String newText = editController.text.trim();
+      if (newText.isNotEmpty && newText != entry.text) {
+        await controller.editHistoryEntry(index, newText);
+        if (sheetContext.mounted) {
+          Navigator.of(sheetContext).pop();
+          _showHistorySheet();
+        }
+      }
+    }
+    editController.dispose();
+  }
+
+  Future<void> _confirmDeleteEntry(BuildContext sheetContext, int index) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: sheetContext,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('删除记录'),
+          content: const Text('确定要删除这条历史记录吗？此操作不可撤销。'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE53935),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('删除'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      await widget.controller.deleteHistoryEntry(index);
+      if (sheetContext.mounted) {
+        Navigator.of(sheetContext).pop();
+        _showHistorySheet();
+      }
+    }
+  }
+
+  /// 回退到此位置：保留此条及之前的所有记录，删除之后的所有记录。
+  Future<void> _confirmRollbackTo(BuildContext sheetContext, int index) async {
+    final ConversationController controller = widget.controller;
+    final int totalEntries = controller.history.entries.length;
+    final int willRemove = totalEntries - index - 1;
+
+    if (willRemove <= 0) {
+      if (sheetContext.mounted) {
+        ScaffoldMessenger.of(
+          sheetContext,
+        ).showSnackBar(const SnackBar(content: Text('已经是最后一条，无需回退')));
+      }
+      return;
+    }
+
+    final bool? confirmed = await showDialog<bool>(
+      context: sheetContext,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('回退到此'),
+          content: Text('将删除此条之后的 $willRemove 条记录，此操作不可撤销。'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFEF6C00),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('确认回退'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      await controller.rollbackHistoryTo(index + 1);
+      if (sheetContext.mounted) {
+        Navigator.of(sheetContext).pop();
+        _showHistorySheet();
+      }
+    }
+  }
+
+  Future<void> _confirmUndoLastTurn(BuildContext sheetContext) async {
+    final ConversationController controller = widget.controller;
+    if (controller.history.entries.isEmpty) {
+      return;
+    }
+
+    final bool? confirmed = await showDialog<bool>(
+      context: sheetContext,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('撤销最后一轮'),
+          content: const Text('将撤销最后一轮对话（用户消息和角色回复）。'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('撤销'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      await controller.undoLastTurn();
+      if (sheetContext.mounted) {
+        Navigator.of(sheetContext).pop();
+        _showHistorySheet();
+      }
+    }
+  }
+
+  Future<void> _confirmClearHistory(BuildContext sheetContext) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: sheetContext,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('清空历史记录'),
+          content: const Text('确定要清空全部历史记录吗？此操作不可撤销。'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE53935),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('清空'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      await widget.controller.clearHistory();
+      if (sheetContext.mounted) {
+        Navigator.of(sheetContext).pop();
+        _showHistorySheet();
+      }
+    }
   }
 
   @override
@@ -617,6 +880,35 @@ class _TachiePlaceholder extends StatelessWidget {
         Icons.image_not_supported_outlined,
         size: 64,
         color: Color(0xFFBFA38A),
+      ),
+    );
+  }
+}
+
+class _SheetIconButton extends StatelessWidget {
+  const _SheetIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.size = 20,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(icon, size: size, color: const Color(0xFF8D6E63)),
+        ),
       ),
     );
   }
