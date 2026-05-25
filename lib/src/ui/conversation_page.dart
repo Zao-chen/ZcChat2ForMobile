@@ -1,6 +1,7 @@
 ﻿import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../controllers/chat_controller.dart';
@@ -701,6 +702,20 @@ class _TachieDisplay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (file == null || !file!.existsSync()) {
+      if (kIsWeb) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: _PluginAnimatedTachie(
+            baseScale: scale,
+            pluginAnimation: pluginAnimation,
+            child: Image.asset(
+              'assets/bootstrap/character/assets/test/Tachie/default.png',
+              fit: BoxFit.contain,
+              errorBuilder: (_, _, _) => const _TachiePlaceholder(),
+            ),
+          ),
+        );
+      }
       return const _TachiePlaceholder();
     }
 
