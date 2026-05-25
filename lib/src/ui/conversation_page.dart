@@ -540,8 +540,8 @@ class _ConversationPageState extends State<ConversationPage> {
                                   child: AnimatedSwitcher(
                                     duration: const Duration(milliseconds: 250),
                                     child: _TachieDisplay(
-                                      key: ValueKey<String?>(
-                                        controller.currentTachieFile?.path,
+                                      key: ValueKey<String>(
+                                        '${controller.currentTachieFile?.path ?? 'web'}|${controller.currentMood}',
                                       ),
                                       file: controller.currentTachieFile,
                                       mood: controller.currentMood,
@@ -704,13 +704,40 @@ class _TachieDisplay extends StatelessWidget {
 
   static const String _webTachieAssetBase =
       'assets/bootstrap/character/assets/亚托莉/Tachie';
+  static const Set<String> _webTachieAssetNames = <String>{
+    'default',
+    '举手-吃惊',
+    '举手-开心',
+    '举手-生气',
+    '举手-认真',
+    '伤心',
+    '侧身-兴奋',
+    '侧身-正常',
+    '侧身-高兴',
+    '充满干劲',
+    '兴奋',
+    '哭泣',
+    '失落',
+    '好奇',
+    '尴尬',
+    '惊呆',
+    '愤怒',
+    '担心',
+    '正常',
+    '生气',
+    '睡觉',
+    '自信',
+    '观望',
+    '认真',
+    '鄙视',
+    '高兴',
+  };
 
   @override
   Widget build(BuildContext context) {
     if (file == null || !file!.existsSync()) {
       if (kIsWeb) {
-        final String assetPath =
-            '$_webTachieAssetBase/$mood.png';
+        final String assetPath = _resolveWebTachieAssetPath(mood);
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: _PluginAnimatedTachie(
@@ -719,9 +746,11 @@ class _TachieDisplay extends StatelessWidget {
             child: Image.asset(
               assetPath,
               fit: BoxFit.contain,
+              gaplessPlayback: true,
               errorBuilder: (_, _, _) => Image.asset(
                 '$_webTachieAssetBase/default.png',
                 fit: BoxFit.contain,
+                gaplessPlayback: true,
                 errorBuilder: (_, _, _) => const _TachiePlaceholder(),
               ),
             ),
@@ -743,6 +772,26 @@ class _TachieDisplay extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _resolveWebTachieAssetPath(String mood) {
+    final String assetName = _normalizeWebTachieMood(mood);
+    return '$_webTachieAssetBase/$assetName.png';
+  }
+
+  String _normalizeWebTachieMood(String mood) {
+    String value = mood.trim();
+    if (value.toLowerCase().endsWith('.png')) {
+      value = value.substring(0, value.length - 4).trim();
+    }
+    value = value
+        .replaceAll(RegExp(r'[\\/]'), '')
+        .replaceAll(RegExp(r'[。！？.!?]+$'), '')
+        .trim();
+    if (_webTachieAssetNames.contains(value)) {
+      return value;
+    }
+    return 'default';
   }
 }
 
