@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -45,9 +45,19 @@ class CharacterImportException implements Exception {
 }
 
 class SettingsRepository {
-  SettingsRepository(this.paths);
+  SettingsRepository(AppStoragePaths paths) : _paths = paths;
 
-  final AppStoragePaths paths;
+  SettingsRepository.webPreview() : _paths = null;
+
+  final AppStoragePaths? _paths;
+
+  AppStoragePaths get paths {
+    final AppStoragePaths? paths = _paths;
+    if (paths == null) {
+      throw UnsupportedError('Web 预览模式不支持本机文件路径');
+    }
+    return paths;
+  }
 
   Future<AppConfig> loadAppConfig() async {
     return AppConfig.fromJson(await _readJsonObject(paths.appConfigFile));
@@ -106,11 +116,24 @@ class SettingsRepository {
 }
 
 class CharacterRepository {
-  CharacterRepository(this.paths)
-    : _animePluginManager = const AnimePluginManager();
+  CharacterRepository(AppStoragePaths paths)
+    : _paths = paths,
+      _animePluginManager = const AnimePluginManager();
 
-  final AppStoragePaths paths;
+  CharacterRepository.webPreview()
+    : _paths = null,
+      _animePluginManager = const AnimePluginManager();
+
+  final AppStoragePaths? _paths;
   final AnimePluginManager _animePluginManager;
+
+  AppStoragePaths get paths {
+    final AppStoragePaths? paths = _paths;
+    if (paths == null) {
+      throw UnsupportedError('Web 预览模式不支持本机文件路径');
+    }
+    return paths;
+  }
 
   Future<List<String>> getCharacters() async {
     if (!await paths.characterAssetsDirectory.exists()) {
@@ -535,10 +558,21 @@ class CharacterRepository {
 }
 
 class ConversationRepository {
-  ConversationRepository(this.paths, this.characterRepository);
+  ConversationRepository(AppStoragePaths paths, this.characterRepository)
+    : _paths = paths;
 
-  final AppStoragePaths paths;
+  ConversationRepository.webPreview(this.characterRepository) : _paths = null;
+
+  final AppStoragePaths? _paths;
   final CharacterRepository characterRepository;
+
+  AppStoragePaths get paths {
+    final AppStoragePaths? paths = _paths;
+    if (paths == null) {
+      throw UnsupportedError('Web 预览模式不支持本机文件路径');
+    }
+    return paths;
+  }
 
   Future<ContextHistory> loadHistory(String characterName) async {
     return ContextHistory.fromJson(
@@ -637,6 +671,295 @@ class ConversationRepository {
       paths.characterContextFile(characterName),
       ContextHistory(history: lines).toJson(),
     );
+  }
+}
+
+class WebPreviewSettingsRepository extends SettingsRepository {
+  WebPreviewSettingsRepository() : super.webPreview();
+
+  AppConfig _config = AppConfig.initial();
+
+  @override
+  Future<AppConfig> loadAppConfig() async {
+    return _config;
+  }
+
+  @override
+  Future<void> saveAppConfig(AppConfig config) async {
+    _config = config;
+  }
+
+  @override
+  Future<void> saveProviderApiKey(
+    LlmProviderType provider,
+    String apiKey,
+  ) async {
+    final ModelProviderConfig updated = _config
+        .providerConfig(provider)
+        .copyWith(apiKey: apiKey.trim());
+    _config = _config.copyWithProvider(provider, updated);
+  }
+
+  @override
+  Future<void> saveProviderModels(
+    LlmProviderType provider,
+    List<String> models,
+  ) async {
+    final ModelProviderConfig updated = _config
+        .providerConfig(provider)
+        .copyWith(models: models.toList(growable: false));
+    _config = _config.copyWithProvider(provider, updated);
+  }
+
+  @override
+  Future<void> saveVitsApiUrl(String apiUrl) async {
+    _config = _config.copyWithVits(_config.vits.copyWith(apiUrl: apiUrl));
+  }
+
+  @override
+  Future<void> saveVitsModelAndSpeakers(List<String> modelAndSpeakers) async {
+    _config = _config.copyWithVits(
+      _config.vits.copyWith(
+        modelAndSpeakers: modelAndSpeakers.toList(growable: false),
+      ),
+    );
+  }
+
+  @override
+  Future<void> saveVitsSentenceSplit(bool enabled) async {
+    _config = _config.copyWithVits(
+      _config.vits.copyWith(sentenceSplit: enabled),
+    );
+  }
+}
+
+class WebPreviewCharacterRepository extends CharacterRepository {
+  WebPreviewCharacterRepository() : super.webPreview();
+
+  String _selectedCharacter = 'test';
+  CharacterAssetConfig _assetConfig = const CharacterAssetConfig(
+    prompt: '你是一名温柔、自然的二次元角色，请用轻松的语气与用户对话。',
+  );
+  CharacterRuntimeConfig _runtimeConfig = const CharacterRuntimeConfig();
+
+  @override
+  Future<List<String>> getCharacters() async {
+    return const <String>['test'];
+  }
+
+  @override
+  Future<String> getSelectedCharacter() async {
+    return _selectedCharacter;
+  }
+
+  @override
+  Future<void> selectCharacter(String characterName) async {
+    _selectedCharacter = characterName.trim().isEmpty ? 'test' : characterName;
+  }
+
+  @override
+  Future<CharacterAssetConfig> loadCharacterAssetConfig(
+    String characterName,
+  ) async {
+    return _assetConfig;
+  }
+
+  @override
+  Future<CharacterRuntimeConfig> loadCharacterRuntimeConfig(
+    String characterName,
+  ) async {
+    return _runtimeConfig;
+  }
+
+  @override
+  Future<void> saveCharacterPrompt(String characterName, String prompt) async {
+    _assetConfig = _assetConfig.copyWith(prompt: prompt);
+  }
+
+  @override
+  Future<void> saveTachieSize(String characterName, int size) async {
+    _runtimeConfig = _runtimeConfig.copyWith(tachieSize: size);
+  }
+
+  @override
+  Future<void> saveTachieTransform(
+    String characterName, {
+    required int size,
+    required double offsetX,
+    required double offsetY,
+  }) async {
+    _runtimeConfig = _runtimeConfig.copyWith(
+      tachieSize: size,
+      tachieOffsetX: offsetX,
+      tachieOffsetY: offsetY,
+    );
+  }
+
+  @override
+  Future<void> resetTachieTransform(String characterName) async {
+    _runtimeConfig = _runtimeConfig.copyWith(
+      tachieSize: 100,
+      tachieOffsetX: 0,
+      tachieOffsetY: 0,
+    );
+  }
+
+  @override
+  Future<void> saveCharacterProvider(
+    String characterName,
+    LlmProviderType provider,
+  ) async {
+    _runtimeConfig = _runtimeConfig.copyWith(
+      serverSelect: provider.configKey,
+      modelSelect: '',
+    );
+  }
+
+  @override
+  Future<void> saveCharacterModel(String characterName, String modelId) async {
+    _runtimeConfig = _runtimeConfig.copyWith(modelSelect: modelId);
+  }
+
+  @override
+  Future<void> saveCharacterVitsEnabled(
+    String characterName,
+    bool enabled,
+  ) async {
+    _runtimeConfig = _runtimeConfig.copyWith(vitsEnable: enabled);
+  }
+
+  @override
+  Future<void> saveCharacterVitsModelAndSpeaker(
+    String characterName,
+    String modelAndSpeaker,
+  ) async {
+    _runtimeConfig = _runtimeConfig.copyWith(vitsMasSelect: modelAndSpeaker);
+  }
+
+  @override
+  Future<void> saveTachieAnimationBinding(
+    String characterName,
+    String actionName,
+    String? animationUniqueKey,
+  ) async {
+    final Map<String, String> map = Map<String, String>.from(
+      _runtimeConfig.tachieAnimations,
+    );
+    final String trimmedKey = (animationUniqueKey ?? '').trim();
+    if (trimmedKey.isEmpty) {
+      map.remove(actionName);
+    } else {
+      map[actionName] = trimmedKey;
+    }
+    _runtimeConfig = _runtimeConfig.copyWith(tachieAnimations: map);
+  }
+
+  @override
+  Future<AnimePluginRegistry> loadAnimePluginRegistry() async {
+    return const AnimePluginRegistry.empty();
+  }
+
+  @override
+  Future<String> installAnimePluginFromFile(String sourceFilePath) async {
+    throw const CharacterImportException('Web 预览模式暂不支持导入动画插件');
+  }
+
+  @override
+  Future<void> deleteAnimePluginByName(String pluginName) async {
+    throw const CharacterImportException('Web 预览模式暂不支持删除动画插件');
+  }
+
+  @override
+  Future<String> importCharacterArchive(
+    Uint8List bytes, {
+    required String archiveName,
+  }) async {
+    throw const CharacterImportException('Web 预览模式暂不支持导入角色包');
+  }
+
+  @override
+  Future<List<String>> getTachieMoodNames(String characterName) async {
+    return const <String>['default'];
+  }
+
+  @override
+  Future<File?> resolveTachieFile(String characterName, String moodName) async {
+    return null;
+  }
+}
+
+class WebPreviewConversationRepository extends ConversationRepository {
+  WebPreviewConversationRepository(super.characterRepository)
+    : super.webPreview();
+
+  final List<String> _history = <String>[];
+
+  @override
+  Future<ContextHistory> loadHistory(String characterName) async {
+    return ContextHistory(history: List<String>.from(_history));
+  }
+
+  @override
+  Future<String> buildUserMessageWithContext(String input) async {
+    if (_history.isEmpty) {
+      return input;
+    }
+    return '以下是你和用户最近的对话，请继续上下文并保持人设一致：\n'
+        '${_history.join('\n')}\n\n'
+        '用户当前输入：$input';
+  }
+
+  @override
+  Future<void> appendUserLine(String text) async {
+    _history.add(
+      HistoryEntry(speaker: HistorySpeaker.user, text: text).toRawLine(),
+    );
+  }
+
+  @override
+  Future<void> appendRoleLine(String text) async {
+    _history.add(
+      HistoryEntry(speaker: HistorySpeaker.role, text: text).toRawLine(),
+    );
+  }
+
+  @override
+  Future<void> updateLine(int index, String newText) async {
+    if (index < 0 || index >= _history.length) {
+      return;
+    }
+    final HistoryEntry originalEntry = HistoryEntry.fromRawLine(
+      _history[index],
+    );
+    _history[index] = HistoryEntry(
+      speaker: originalEntry.speaker,
+      text: newText,
+    ).toRawLine();
+  }
+
+  @override
+  Future<void> deleteLine(int index) async {
+    if (index < 0 || index >= _history.length) {
+      return;
+    }
+    _history.removeAt(index);
+  }
+
+  @override
+  Future<void> rollbackTo(int index) async {
+    if (index <= 0) {
+      _history.clear();
+      return;
+    }
+    if (index >= _history.length) {
+      return;
+    }
+    _history.removeRange(index, _history.length);
+  }
+
+  @override
+  Future<void> clearHistory() async {
+    _history.clear();
   }
 }
 

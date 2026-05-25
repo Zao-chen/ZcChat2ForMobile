@@ -1,8 +1,8 @@
-﻿import 'dart:io';
-import 'dart:typed_data';
+import 'dart:io';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -347,7 +347,7 @@ class _AboutPageState extends State<AboutPage> {
         _latestTagName != null &&
         _latestTagName!.isNotEmpty &&
         _latestTagName != _appVersion;
-    if (hasNewVersion && _latestApkUrl != null) {
+    if (!kIsWeb && hasNewVersion && _latestApkUrl != null) {
       await _downloadAndInstallLatestApk();
       return;
     }
@@ -460,7 +460,7 @@ class _AboutPageState extends State<AboutPage> {
               ? '下载中 ${(100 * _downloadProgress).toStringAsFixed(0)}%'
               : '下载中...')
         : hasNewVersion
-        ? (_latestApkUrl != null
+        ? (!kIsWeb && _latestApkUrl != null
               ? '发现新版本 v$_latestTagName（下载APK）'
               : '发现新版本 v$_latestTagName')
         : (_statusText ?? '检查更新');
@@ -497,11 +497,12 @@ class _AboutPageState extends State<AboutPage> {
                 icon: const Icon(Icons.bug_report_outlined),
                 label: const Text('Issue'),
               ),
-              FilledButton.tonalIcon(
-                onPressed: _openLogPath,
-                icon: const Icon(Icons.description_outlined),
-                label: const Text('软件日志'),
-              ),
+              if (!kIsWeb)
+                FilledButton.tonalIcon(
+                  onPressed: _openLogPath,
+                  icon: const Icon(Icons.description_outlined),
+                  label: const Text('软件日志'),
+                ),
             ],
           ),
           const SizedBox(height: 16),
@@ -731,18 +732,21 @@ class _PluginSettingsPageState extends State<PluginSettingsPage> {
                   label: const Text('刷新'),
                 ),
                 const SizedBox(width: 8),
-                FilledButton.icon(
-                  onPressed: _importAnimePlugin,
-                  icon: const Icon(Icons.file_upload_outlined),
-                  label: const Text('导入插件'),
-                ),
+                if (!kIsWeb)
+                  FilledButton.icon(
+                    onPressed: _importAnimePlugin,
+                    icon: const Icon(Icons.file_upload_outlined),
+                    label: const Text('导入插件'),
+                  ),
               ],
             ),
             const SizedBox(height: 8),
             if (_registry.plugins.isEmpty)
               const Padding(
                 padding: EdgeInsets.only(top: 16),
-                child: Text('暂无动画插件，请先导入 json 插件文件。'),
+                child: Text(
+                  kIsWeb ? 'Web 预览模式暂不支持动画插件。' : '暂无动画插件，请先导入 json 插件文件。',
+                ),
               ),
             if (_registry.lastErrors.isNotEmpty)
               Padding(
@@ -1542,20 +1546,21 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
                   onChanged: _switchCharacter,
                 ),
                 const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: _isImporting ? null : _importCharacter,
-                  icon: _isImporting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.download_rounded),
-                  label: Text(_isImporting ? '导入中' : '导入'),
-                ),
+                if (!kIsWeb)
+                  FilledButton.icon(
+                    onPressed: _isImporting ? null : _importCharacter,
+                    icon: _isImporting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.download_rounded),
+                    label: Text(_isImporting ? '导入中' : '导入'),
+                  ),
               ],
             ),
           ),

@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 
 import 'controllers/chat_controller.dart';
 import 'models/app_models.dart';
@@ -15,10 +15,26 @@ import 'ui/settings_page.dart';
 class ZcChatApp extends StatefulWidget {
   const ZcChatApp({
     required this.storagePaths,
+    this.characterRepository,
+    this.settingsRepository,
+    this.conversationRepository,
+    this.vitsPlayback,
     super.key,
   });
 
-  final AppStoragePaths storagePaths;
+  const ZcChatApp.webPreview({
+    required CharacterRepository this.characterRepository,
+    required SettingsRepository this.settingsRepository,
+    required ConversationRepository this.conversationRepository,
+    required VitsPlayback this.vitsPlayback,
+    super.key,
+  }) : storagePaths = null;
+
+  final AppStoragePaths? storagePaths;
+  final CharacterRepository? characterRepository;
+  final SettingsRepository? settingsRepository;
+  final ConversationRepository? conversationRepository;
+  final VitsPlayback? vitsPlayback;
 
   @override
   State<ZcChatApp> createState() => _ZcChatAppState();
@@ -36,18 +52,20 @@ class _ZcChatAppState extends State<ZcChatApp> {
   @override
   void initState() {
     super.initState();
-    _characterRepository = CharacterRepository(widget.storagePaths);
-    _settingsRepository = SettingsRepository(widget.storagePaths);
-    _conversationRepository = ConversationRepository(
-      widget.storagePaths,
-      _characterRepository,
-    );
+    _characterRepository =
+        widget.characterRepository ?? CharacterRepository(widget.storagePaths!);
+    _settingsRepository =
+        widget.settingsRepository ?? SettingsRepository(widget.storagePaths!);
+    _conversationRepository =
+        widget.conversationRepository ??
+        ConversationRepository(widget.storagePaths!, _characterRepository);
     _services = <LlmProviderType, LlmService>{
       LlmProviderType.openAI: OpenAiLlmService(),
       LlmProviderType.deepSeek: DeepSeekLlmService(),
     };
     _vitsService = VitsSimpleApiService();
-    _vitsPlayback = VitsPlaybackService(service: _vitsService);
+    _vitsPlayback =
+        widget.vitsPlayback ?? VitsPlaybackService(service: _vitsService);
     _controller = ConversationController(
       characterRepository: _characterRepository,
       settingsRepository: _settingsRepository,
@@ -99,3 +117,19 @@ class _ZcChatAppState extends State<ZcChatApp> {
   }
 }
 
+class NoopVitsPlayback implements VitsPlayback {
+  const NoopVitsPlayback();
+
+  @override
+  Future<void> enqueueSegments({
+    required String apiUrl,
+    required String modelAndSpeaker,
+    required Iterable<String> texts,
+  }) async {}
+
+  @override
+  Future<void> stop() async {}
+
+  @override
+  void dispose() {}
+}
