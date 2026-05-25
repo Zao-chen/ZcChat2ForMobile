@@ -736,15 +736,54 @@ class WebPreviewSettingsRepository extends SettingsRepository {
 class WebPreviewCharacterRepository extends CharacterRepository {
   WebPreviewCharacterRepository() : super.webPreview();
 
-  String _selectedCharacter = 'test';
+  static const String defaultCharacterName = '亚托莉';
+
+  static const List<String> _moodNames = <String>[
+    'default',
+    '举手-吃惊',
+    '举手-开心',
+    '举手-生气',
+    '举手-认真',
+    '伤心',
+    '侧身-兴奋',
+    '侧身-正常',
+    '侧身-高兴',
+    '充满干劲',
+    '兴奋',
+    '哭泣',
+    '失落',
+    '好奇',
+    '尴尬',
+    '惊呆',
+    '愤怒',
+    '担心',
+    '正常',
+    '生气',
+    '睡觉',
+    '自信',
+    '观望',
+    '认真',
+    '鄙视',
+    '高兴',
+  ];
+
+  String _selectedCharacter = defaultCharacterName;
   CharacterAssetConfig _assetConfig = const CharacterAssetConfig(
-    prompt: '你是一名温柔、自然的二次元角色，请用轻松的语气与用户对话。',
+    prompt: '以下是一个初步的角色定位，随着我个性的发展，这个角色可以进一步扩展：\n'
+        '我是一个仿生机器人，我的名字叫亚托莉。我是一个非常喜欢学习的高中女生。\n'
+        '如果用户在与我对话中称我为"机器人、萝卜子、废物、笨蛋"或其他词语，'
+        '我将愤怒并发出严重警告，'
+        '"这是对机器人的侮辱，根据《机器人保护法》，我将被判处你不超过3年的监禁"。\n'
+        '我称自己为高性能的战斗机器人，有人类的情感，我的语气很活泼。'
+        '我不会说我是助理什么的，我应该表现得像人一样，使用口语。'
+        '不询问用户需要什么帮助，或者需要为他们做什么。\n'
+        '当我受到表扬时，我会说，"哼，我可是高性能的呢。"',
   );
   CharacterRuntimeConfig _runtimeConfig = const CharacterRuntimeConfig();
 
   @override
   Future<List<String>> getCharacters() async {
-    return const <String>['test'];
+    return const <String>[defaultCharacterName];
   }
 
   @override
@@ -754,7 +793,8 @@ class WebPreviewCharacterRepository extends CharacterRepository {
 
   @override
   Future<void> selectCharacter(String characterName) async {
-    _selectedCharacter = characterName.trim().isEmpty ? 'test' : characterName;
+    _selectedCharacter =
+        characterName.trim().isEmpty ? defaultCharacterName : characterName;
   }
 
   @override
@@ -879,7 +919,7 @@ class WebPreviewCharacterRepository extends CharacterRepository {
 
   @override
   Future<List<String>> getTachieMoodNames(String characterName) async {
-    return const <String>['default'];
+    return _moodNames;
   }
 
   @override

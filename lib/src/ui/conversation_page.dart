@@ -544,6 +544,7 @@ class _ConversationPageState extends State<ConversationPage> {
                                         controller.currentTachieFile?.path,
                                       ),
                                       file: controller.currentTachieFile,
+                                      mood: controller.currentMood,
                                       scale: _tachieScale,
                                       pluginAnimation: _activePluginAnimation,
                                     ),
@@ -690,28 +691,39 @@ class _DialogPanel extends StatelessWidget {
 class _TachieDisplay extends StatelessWidget {
   const _TachieDisplay({
     required this.file,
+    required this.mood,
     required this.scale,
     required this.pluginAnimation,
     super.key,
   });
 
   final File? file;
+  final String mood;
   final double scale;
   final AnimePluginAnimation? pluginAnimation;
+
+  static const String _webTachieAssetBase =
+      'assets/bootstrap/character/assets/亚托莉/Tachie';
 
   @override
   Widget build(BuildContext context) {
     if (file == null || !file!.existsSync()) {
       if (kIsWeb) {
+        final String assetPath =
+            '$_webTachieAssetBase/$mood.png';
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: _PluginAnimatedTachie(
             baseScale: scale,
             pluginAnimation: pluginAnimation,
             child: Image.asset(
-              'assets/bootstrap/character/assets/test/Tachie/default.png',
+              assetPath,
               fit: BoxFit.contain,
-              errorBuilder: (_, _, _) => const _TachiePlaceholder(),
+              errorBuilder: (_, _, _) => Image.asset(
+                '$_webTachieAssetBase/default.png',
+                fit: BoxFit.contain,
+                errorBuilder: (_, _, _) => const _TachiePlaceholder(),
+              ),
             ),
           ),
         );

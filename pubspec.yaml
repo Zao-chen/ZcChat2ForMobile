@@ -28,4 +28,31 @@ flutter:
   uses-material-design: true
   assets:
     - assets/bootstrap/character/assets/test/Tachie/default.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/default.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/举手-吃惊.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/举手-开心.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/举手-生气.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/举手-认真.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/伤心.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/侧身-兴奋.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/侧身-正常.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/侧身-高兴.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/充满干劲.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/兴奋.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/哭泣.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/失落.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/好奇.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/尴尬.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/惊呆.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/愤怒.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/担心.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/正常.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/生气.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/睡觉.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/自信.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/观望.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/认真.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/鄙视.png
+    - assets/bootstrap/character/assets/亚托莉/Tachie/高兴.png
+    - assets/bootstrap/character/assets/亚托莉/config.json
     - assets/bootstrap/plugin/anime/Basic Animation Package.json
