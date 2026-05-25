@@ -9,6 +9,7 @@ import '../models/app_models.dart';
 import '../models/anime_plugin_models.dart';
 import '../services/anime_plugin_manager.dart';
 import 'app_storage_paths.dart';
+import 'web_preview_storage.dart';
 
 Future<Map<String, dynamic>> _readJsonObject(File file) async {
   if (!await file.exists()) {
@@ -33,6 +34,37 @@ Future<Map<String, dynamic>> _readJsonObject(File file) async {
 Future<void> _writeJsonObject(File file, Map<String, dynamic> json) async {
   await file.parent.create(recursive: true);
   await file.writeAsString(const JsonEncoder.withIndent('  ').convert(json));
+}
+
+Map<String, dynamic> _readStoredJsonObject(
+  WebPreviewStorage storage,
+  String key,
+) {
+  final String? content = storage.read(key);
+  if (content == null || content.trim().isEmpty) {
+    return <String, dynamic>{};
+  }
+
+  try {
+    final Object? decoded = jsonDecode(content);
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+    if (decoded is Map) {
+      return decoded.cast<String, dynamic>();
+    }
+  } catch (_) {
+    storage.remove(key);
+  }
+  return <String, dynamic>{};
+}
+
+void _writeStoredJsonObject(
+  WebPreviewStorage storage,
+  String key,
+  Map<String, dynamic> json,
+) {
+  storage.write(key, const JsonEncoder.withIndent('  ').convert(json));
 }
 
 class CharacterImportException implements Exception {
@@ -675,9 +707,16 @@ class ConversationRepository {
 }
 
 class WebPreviewSettingsRepository extends SettingsRepository {
-  WebPreviewSettingsRepository() : super.webPreview();
+  WebPreviewSettingsRepository(this.storage)
+    : _config = AppConfig.fromJson(
+        _readStoredJsonObject(storage, _appConfigKey),
+      ),
+      super.webPreview();
 
-  AppConfig _config = AppConfig.initial();
+  static const String _appConfigKey = 'zcchat2.webPreview.appConfig';
+
+  final WebPreviewStorage storage;
+  AppConfig _config;
 
   @override
   Future<AppConfig> loadAppConfig() async {
@@ -687,6 +726,7 @@ class WebPreviewSettingsRepository extends SettingsRepository {
   @override
   Future<void> saveAppConfig(AppConfig config) async {
     _config = config;
+    _writeStoredJsonObject(storage, _appConfigKey, _config.toJson());
   }
 
   @override
@@ -697,7 +737,7 @@ class WebPreviewSettingsRepository extends SettingsRepository {
     final ModelProviderConfig updated = _config
         .providerConfig(provider)
         .copyWith(apiKey: apiKey.trim());
-    _config = _config.copyWithProvider(provider, updated);
+    await saveAppConfig(_config.copyWithProvider(provider, updated));
   }
 
   @override
@@ -708,35 +748,52 @@ class WebPreviewSettingsRepository extends SettingsRepository {
     final ModelProviderConfig updated = _config
         .providerConfig(provider)
         .copyWith(models: models.toList(growable: false));
-    _config = _config.copyWithProvider(provider, updated);
+    await saveAppConfig(_config.copyWithProvider(provider, updated));
   }
 
   @override
   Future<void> saveVitsApiUrl(String apiUrl) async {
-    _config = _config.copyWithVits(_config.vits.copyWith(apiUrl: apiUrl));
+    await saveAppConfig(
+      _config.copyWithVits(_config.vits.copyWith(apiUrl: apiUrl.trim())),
+    );
   }
 
   @override
   Future<void> saveVitsModelAndSpeakers(List<String> modelAndSpeakers) async {
-    _config = _config.copyWithVits(
-      _config.vits.copyWith(
-        modelAndSpeakers: modelAndSpeakers.toList(growable: false),
+    await saveAppConfig(
+      _config.copyWithVits(
+        _config.vits.copyWith(
+          modelAndSpeakers: modelAndSpeakers.toList(growable: false),
+        ),
       ),
     );
   }
 
   @override
   Future<void> saveVitsSentenceSplit(bool enabled) async {
-    _config = _config.copyWithVits(
-      _config.vits.copyWith(sentenceSplit: enabled),
+    await saveAppConfig(
+      _config.copyWithVits(_config.vits.copyWith(sentenceSplit: enabled)),
     );
   }
 }
 
 class WebPreviewCharacterRepository extends CharacterRepository {
-  WebPreviewCharacterRepository() : super.webPreview();
+  WebPreviewCharacterRepository(this.storage)
+    : _selectedCharacter =
+          storage.read(_selectedCharacterKey)?.trim().isNotEmpty == true
+          ? storage.read(_selectedCharacterKey)!.trim()
+          : defaultCharacterName,
+      _assetConfig = _loadAssetConfig(storage),
+      _runtimeConfig = CharacterRuntimeConfig.fromJson(
+        _readStoredJsonObject(storage, _runtimeConfigKey),
+      ),
+      super.webPreview();
 
   static const String defaultCharacterName = '亚托莉';
+  static const String _selectedCharacterKey =
+      'zcchat2.webPreview.selectedCharacter';
+  static const String _assetConfigKey = 'zcchat2.webPreview.characterAsset';
+  static const String _runtimeConfigKey = 'zcchat2.webPreview.characterRuntime';
 
   static const List<String> _moodNames = <String>[
     'default',
@@ -767,9 +824,9 @@ class WebPreviewCharacterRepository extends CharacterRepository {
     '高兴',
   ];
 
-  String _selectedCharacter = defaultCharacterName;
-  CharacterAssetConfig _assetConfig = const CharacterAssetConfig(
-    prompt: '以下是一个初步的角色定位，随着我个性的发展，这个角色可以进一步扩展：\n'
+  static const CharacterAssetConfig _defaultAssetConfig = CharacterAssetConfig(
+    prompt:
+        '以下是一个初步的角色定位，随着我个性的发展，这个角色可以进一步扩展：\n'
         '我是一个仿生机器人，我的名字叫亚托莉。我是一个非常喜欢学习的高中女生。\n'
         '如果用户在与我对话中称我为"机器人、萝卜子、废物、笨蛋"或其他词语，'
         '我将愤怒并发出严重警告，'
@@ -779,7 +836,34 @@ class WebPreviewCharacterRepository extends CharacterRepository {
         '不询问用户需要什么帮助，或者需要为他们做什么。\n'
         '当我受到表扬时，我会说，"哼，我可是高性能的呢。"',
   );
-  CharacterRuntimeConfig _runtimeConfig = const CharacterRuntimeConfig();
+
+  final WebPreviewStorage storage;
+  String _selectedCharacter;
+  CharacterAssetConfig _assetConfig;
+  CharacterRuntimeConfig _runtimeConfig;
+
+  static CharacterAssetConfig _loadAssetConfig(WebPreviewStorage storage) {
+    final Map<String, dynamic> json = _readStoredJsonObject(
+      storage,
+      _assetConfigKey,
+    );
+    if (json.isEmpty) {
+      return _defaultAssetConfig;
+    }
+    return CharacterAssetConfig.fromJson(json);
+  }
+
+  void _saveSelectedCharacter() {
+    storage.write(_selectedCharacterKey, _selectedCharacter);
+  }
+
+  void _saveAssetConfig() {
+    _writeStoredJsonObject(storage, _assetConfigKey, _assetConfig.toJson());
+  }
+
+  void _saveRuntimeConfig() {
+    _writeStoredJsonObject(storage, _runtimeConfigKey, _runtimeConfig.toJson());
+  }
 
   @override
   Future<List<String>> getCharacters() async {
@@ -793,8 +877,10 @@ class WebPreviewCharacterRepository extends CharacterRepository {
 
   @override
   Future<void> selectCharacter(String characterName) async {
-    _selectedCharacter =
-        characterName.trim().isEmpty ? defaultCharacterName : characterName;
+    _selectedCharacter = characterName.trim().isEmpty
+        ? defaultCharacterName
+        : characterName;
+    _saveSelectedCharacter();
   }
 
   @override
@@ -814,11 +900,13 @@ class WebPreviewCharacterRepository extends CharacterRepository {
   @override
   Future<void> saveCharacterPrompt(String characterName, String prompt) async {
     _assetConfig = _assetConfig.copyWith(prompt: prompt);
+    _saveAssetConfig();
   }
 
   @override
   Future<void> saveTachieSize(String characterName, int size) async {
     _runtimeConfig = _runtimeConfig.copyWith(tachieSize: size);
+    _saveRuntimeConfig();
   }
 
   @override
@@ -833,6 +921,7 @@ class WebPreviewCharacterRepository extends CharacterRepository {
       tachieOffsetX: offsetX,
       tachieOffsetY: offsetY,
     );
+    _saveRuntimeConfig();
   }
 
   @override
@@ -842,6 +931,7 @@ class WebPreviewCharacterRepository extends CharacterRepository {
       tachieOffsetX: 0,
       tachieOffsetY: 0,
     );
+    _saveRuntimeConfig();
   }
 
   @override
@@ -853,11 +943,13 @@ class WebPreviewCharacterRepository extends CharacterRepository {
       serverSelect: provider.configKey,
       modelSelect: '',
     );
+    _saveRuntimeConfig();
   }
 
   @override
   Future<void> saveCharacterModel(String characterName, String modelId) async {
     _runtimeConfig = _runtimeConfig.copyWith(modelSelect: modelId);
+    _saveRuntimeConfig();
   }
 
   @override
@@ -866,6 +958,7 @@ class WebPreviewCharacterRepository extends CharacterRepository {
     bool enabled,
   ) async {
     _runtimeConfig = _runtimeConfig.copyWith(vitsEnable: enabled);
+    _saveRuntimeConfig();
   }
 
   @override
@@ -874,6 +967,7 @@ class WebPreviewCharacterRepository extends CharacterRepository {
     String modelAndSpeaker,
   ) async {
     _runtimeConfig = _runtimeConfig.copyWith(vitsMasSelect: modelAndSpeaker);
+    _saveRuntimeConfig();
   }
 
   @override
@@ -892,6 +986,7 @@ class WebPreviewCharacterRepository extends CharacterRepository {
       map[actionName] = trimmedKey;
     }
     _runtimeConfig = _runtimeConfig.copyWith(tachieAnimations: map);
+    _saveRuntimeConfig();
   }
 
   @override
@@ -929,10 +1024,24 @@ class WebPreviewCharacterRepository extends CharacterRepository {
 }
 
 class WebPreviewConversationRepository extends ConversationRepository {
-  WebPreviewConversationRepository(super.characterRepository)
-    : super.webPreview();
+  WebPreviewConversationRepository(super.characterRepository, this.storage)
+    : _history = ContextHistory.fromJson(
+        _readStoredJsonObject(storage, _historyKey),
+      ).history.toList(growable: true),
+      super.webPreview();
 
-  final List<String> _history = <String>[];
+  static const String _historyKey = 'zcchat2.webPreview.history';
+
+  final WebPreviewStorage storage;
+  final List<String> _history;
+
+  void _persistHistory() {
+    _writeStoredJsonObject(
+      storage,
+      _historyKey,
+      ContextHistory(history: _history).toJson(),
+    );
+  }
 
   @override
   Future<ContextHistory> loadHistory(String characterName) async {
@@ -954,6 +1063,7 @@ class WebPreviewConversationRepository extends ConversationRepository {
     _history.add(
       HistoryEntry(speaker: HistorySpeaker.user, text: text).toRawLine(),
     );
+    _persistHistory();
   }
 
   @override
@@ -961,6 +1071,7 @@ class WebPreviewConversationRepository extends ConversationRepository {
     _history.add(
       HistoryEntry(speaker: HistorySpeaker.role, text: text).toRawLine(),
     );
+    _persistHistory();
   }
 
   @override
@@ -975,6 +1086,7 @@ class WebPreviewConversationRepository extends ConversationRepository {
       speaker: originalEntry.speaker,
       text: newText,
     ).toRawLine();
+    _persistHistory();
   }
 
   @override
@@ -983,23 +1095,27 @@ class WebPreviewConversationRepository extends ConversationRepository {
       return;
     }
     _history.removeAt(index);
+    _persistHistory();
   }
 
   @override
   Future<void> rollbackTo(int index) async {
     if (index <= 0) {
       _history.clear();
+      _persistHistory();
       return;
     }
     if (index >= _history.length) {
       return;
     }
     _history.removeRange(index, _history.length);
+    _persistHistory();
   }
 
   @override
   Future<void> clearHistory() async {
     _history.clear();
+    _persistHistory();
   }
 }
 
