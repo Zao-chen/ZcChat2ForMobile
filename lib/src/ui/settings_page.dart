@@ -68,6 +68,20 @@ class SettingsPage extends StatelessWidget {
             },
           ),
           _SettingsEntry(
+            title: '语音输入',
+            subtitle: '百度语音识别',
+            icon: Icons.mic_outlined,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => SpeechInputSettingsPage(
+                    settingsRepository: settingsRepository,
+                  ),
+                ),
+              );
+            },
+          ),
+          _SettingsEntry(
             title: '插件配置',
             subtitle: '动画插件管理与详情',
             icon: Icons.extension_rounded,
@@ -1289,6 +1303,153 @@ class _VitsSimpleApiSettingsPageState extends State<VitsSimpleApiSettingsPage> {
                       title: Text(item),
                     ),
                   ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class SpeechInputSettingsPage extends StatefulWidget {
+  const SpeechInputSettingsPage({required this.settingsRepository, super.key});
+
+  final SettingsRepository settingsRepository;
+
+  @override
+  State<SpeechInputSettingsPage> createState() =>
+      _SpeechInputSettingsPageState();
+}
+
+class _SpeechInputSettingsPageState extends State<SpeechInputSettingsPage> {
+  final TextEditingController _apiKeyController = TextEditingController();
+  final TextEditingController _secretKeyController = TextEditingController();
+
+  bool _isLoading = true;
+  AppConfig _appConfig = AppConfig.initial();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _apiKeyController.dispose();
+    _secretKeyController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final AppConfig config = await widget.settingsRepository.loadAppConfig();
+    _appConfig = config;
+    _apiKeyController.text = config.speechInput.baiduApiKey;
+    _secretKeyController.text = config.speechInput.baiduSecretKey;
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _save(SpeechInputConfig updated) async {
+    _appConfig = _appConfig.copyWithSpeechInput(updated);
+    await widget.settingsRepository.saveSpeechInputConfig(updated);
+  }
+
+  Future<void> _saveApiKey(String value) async {
+    await _save(_appConfig.speechInput.copyWith(baiduApiKey: value));
+  }
+
+  Future<void> _saveSecretKey(String value) async {
+    await _save(_appConfig.speechInput.copyWith(baiduSecretKey: value));
+  }
+
+  Future<void> _toggleEnable(bool value) async {
+    setState(() {
+      _appConfig = _appConfig.copyWithSpeechInput(
+        _appConfig.speechInput.copyWith(enable: value),
+      );
+    });
+    await widget.settingsRepository
+        .saveSpeechInputConfig(_appConfig.speechInput);
+  }
+
+  Future<void> _toggleAutoSend(bool value) async {
+    setState(() {
+      _appConfig = _appConfig.copyWithSpeechInput(
+        _appConfig.speechInput.copyWith(autoSend: value),
+      );
+    });
+    await widget.settingsRepository
+        .saveSpeechInputConfig(_appConfig.speechInput);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    final SpeechInputConfig speechConfig = _appConfig.speechInput;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('语音输入')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: <Widget>[
+          _SettingsSection(
+            title: '百度语音识别',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Text(
+                  '使用百度智能云的语音识别服务，将录音转换为文字。\n'
+                  '请前往 https://cloud.baidu.com/ 创建应用并获取 API Key 和 Secret Key。',
+                  style: TextStyle(fontSize: 13, color: Color(0xFF666666)),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _apiKeyController,
+                  decoration: const InputDecoration(
+                    labelText: 'API Key',
+                    filled: true,
+                  ),
+                  onChanged: _saveApiKey,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _secretKeyController,
+                  decoration: const InputDecoration(
+                    labelText: 'Secret Key',
+                    filled: true,
+                  ),
+                  onChanged: _saveSecretKey,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SettingsSection(
+            title: '设置',
+            child: Column(
+              children: <Widget>[
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  value: speechConfig.enable,
+                  title: const Text('启用长按输入按钮'),
+                  subtitle: const Text('在对话面板显示麦克风按钮，长按录音'),
+                  onChanged: _toggleEnable,
+                ),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  value: speechConfig.autoSend,
+                  title: const Text('自动发送'),
+                  subtitle: const Text('识别完成后直接发送，不经过编辑'),
+                  onChanged: _toggleAutoSend,
+                ),
               ],
             ),
           ),

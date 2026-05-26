@@ -1,12 +1,17 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 
 import '../models/app_models.dart';
 import '../models/anime_plugin_models.dart';
 import '../repositories/app_repositories.dart';
+import '../services/baidu_speech_service.dart';
 import '../services/llm_service.dart';
 import '../services/vits_service.dart';
 
@@ -28,6 +33,9 @@ class ConversationController extends ChangeNotifier {
   bool isLoading = true;
   bool isSending = false;
   bool showContinueButton = false;
+  bool isRecording = false;
+  bool isRecognizing = false;
+  String pendingInputText = '';
   String selectedCharacter = 'test';
   CharacterAssetConfig characterAssetConfig = const CharacterAssetConfig();
   CharacterRuntimeConfig runtimeConfig = const CharacterRuntimeConfig();
@@ -39,6 +47,15 @@ class ConversationController extends ChangeNotifier {
   File? currentTachieFile;
   String _rawReply = '';
   int _streamSynthCursor = 0;
+
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  final BaiduSpeechService _speechService = const BaiduSpeechService();
+  bool _isStartingRecording = false;
+  bool _isStoppingRecording = false;
+  bool _stopRequestedDuringStart = false;
+  String? _recordingFilePath;
+  BytesBuilder? _recordingBytes;
+  StreamSubscription<Uint8List>? _recordingStreamSubscription;
 
   Future<void> initialize() async {
     await reload();
@@ -166,6 +183,232 @@ class ConversationController extends ChangeNotifier {
     _rawReply = '';
     showContinueButton = false;
     notifyListeners();
+  }
+
+  Future<void> startRecording() async {
+    if (isRecording ||
+        _isStartingRecording ||
+        _isStoppingRecording ||
+        isSending ||
+        isRecognizing) {
+      return;
+    }
+
+    _isStartingRecording = true;
+    _stopRequestedDuringStart = false;
+    showContinueButton = false;
+    currentDisplayText = '';
+    pendingInputText = '';
+    notifyListeners();
+
+    bool shouldStopAfterStart = false;
+
+    try {
+      if (!await _audioRecorder.hasPermission()) {
+        currentDisplayText = '麦克风权限未授权，请在系统设置中开启。';
+        showContinueButton = true;
+        notifyListeners();
+        return;
+      }
+
+      final Directory tempDir = await getTemporaryDirectory();
+      final String filePath = p.join(
+        tempDir.path,
+        'speech_input_${DateTime.now().millisecondsSinceEpoch}.wav',
+      );
+      _recordingFilePath = filePath;
+
+      final Stream<Uint8List> stream = await _audioRecorder.startStream(
+        const RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: _speechSampleRate,
+          numChannels: _speechChannels,
+          streamBufferSize: 2048,
+        ),
+      );
+      final BytesBuilder recordingBytes = BytesBuilder(copy: false);
+      _recordingBytes = recordingBytes;
+      _recordingStreamSubscription = stream.listen(recordingBytes.add);
+
+      isRecording = true;
+      shouldStopAfterStart = _stopRequestedDuringStart;
+      notifyListeners();
+    } catch (error) {
+      await _clearRecordingSession();
+      currentDisplayText = '录音启动失败：$error';
+      showContinueButton = true;
+      notifyListeners();
+    } finally {
+      _isStartingRecording = false;
+      if (!isRecording) {
+        _stopRequestedDuringStart = false;
+      }
+    }
+
+    if (shouldStopAfterStart && isRecording) {
+      _stopRequestedDuringStart = false;
+      await stopRecording();
+    }
+  }
+
+  Future<void> stopRecording() async {
+    if (_isStartingRecording && !isRecording) {
+      _stopRequestedDuringStart = true;
+      return;
+    }
+    if (!isRecording || _isStoppingRecording) {
+      return;
+    }
+
+    _isStoppingRecording = true;
+    _stopRequestedDuringStart = false;
+    isRecording = false;
+    notifyListeners();
+
+    String? filePath;
+    try {
+      filePath = await _finishStreamRecording();
+    } catch (_) {
+      // 录音停止失败，仍然重置状态
+    } finally {
+      _isStoppingRecording = false;
+      _stopRequestedDuringStart = false;
+    }
+
+    filePath = await _resolveRecordedFilePath(filePath);
+    await _clearRecordingSession();
+
+    if (filePath == null || filePath.isEmpty) {
+      currentDisplayText = '没有录到声音，请长按说话。';
+      showContinueButton = true;
+      notifyListeners();
+      return;
+    }
+
+    final SpeechInputConfig speechConfig = appConfig.speechInput;
+    if (speechConfig.baiduApiKey.isEmpty ||
+        speechConfig.baiduSecretKey.isEmpty) {
+      currentDisplayText = '请先在设置页配置百度语音识别 API Key 和 Secret Key。';
+      showContinueButton = true;
+      notifyListeners();
+      return;
+    }
+
+    isRecognizing = true;
+    notifyListeners();
+
+    try {
+      final String recognized = await _speechService.recognize(
+        apiKey: speechConfig.baiduApiKey,
+        secretKey: speechConfig.baiduSecretKey,
+        audioFile: File(filePath),
+        format: _speechFormatForPath(filePath),
+      );
+
+      if (recognized.isEmpty) {
+        currentDisplayText = '语音识别结果为空。';
+        showContinueButton = true;
+      } else if (speechConfig.autoSend) {
+        await sendMessage(recognized);
+      } else {
+        pendingInputText = recognized;
+      }
+    } on SpeechRecognitionException catch (error) {
+      currentDisplayText = '语音识别失败：${error.message}';
+      showContinueButton = true;
+    } catch (error) {
+      currentDisplayText = '语音识别失败：$error';
+      showContinueButton = true;
+    }
+
+    isRecognizing = false;
+    notifyListeners();
+  }
+
+  Future<String?> _finishStreamRecording() async {
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await _audioRecorder.stop();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    await _recordingStreamSubscription?.cancel();
+    _recordingStreamSubscription = null;
+
+    final String? filePath = _recordingFilePath;
+    final Uint8List pcmBytes = _recordingBytes?.takeBytes() ?? Uint8List(0);
+    _recordingBytes = null;
+
+    if (filePath == null || filePath.isEmpty || pcmBytes.isEmpty) {
+      return null;
+    }
+
+    final File outputFile = File(filePath);
+    await outputFile.parent.create(recursive: true);
+    await outputFile.writeAsBytes(_buildWavBytes(pcmBytes), flush: true);
+    return filePath;
+  }
+
+  Future<String?> _resolveRecordedFilePath(String? stoppedPath) async {
+    final String? candidate = stoppedPath != null && stoppedPath.isNotEmpty
+        ? stoppedPath
+        : _recordingFilePath;
+    if (candidate == null || candidate.isEmpty) {
+      return null;
+    }
+
+    try {
+      final File file = File(candidate);
+      if (!await file.exists() || await file.length() == 0) {
+        return null;
+      }
+      return candidate;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _clearRecordingSession() async {
+    await _recordingStreamSubscription?.cancel();
+    _recordingStreamSubscription = null;
+    _recordingBytes = null;
+    _recordingFilePath = null;
+  }
+
+  String _speechFormatForPath(String filePath) {
+    return p.extension(filePath).toLowerCase() == '.wav' ? 'wav' : 'm4a';
+  }
+
+  Uint8List _buildWavBytes(Uint8List pcmBytes) {
+    final Uint8List wavBytes = Uint8List(44 + pcmBytes.length);
+    final ByteData header = ByteData.sublistView(wavBytes);
+
+    void writeAscii(int offset, String value) {
+      for (int i = 0; i < value.length; i += 1) {
+        wavBytes[offset + i] = value.codeUnitAt(i);
+      }
+    }
+
+    writeAscii(0, 'RIFF');
+    header.setUint32(4, 36 + pcmBytes.length, Endian.little);
+    writeAscii(8, 'WAVE');
+    writeAscii(12, 'fmt ');
+    header.setUint32(16, 16, Endian.little);
+    header.setUint16(20, 1, Endian.little);
+    header.setUint16(22, _speechChannels, Endian.little);
+    header.setUint32(24, _speechSampleRate, Endian.little);
+    header.setUint32(
+      28,
+      _speechSampleRate * _speechChannels * _speechBytesPerSample,
+      Endian.little,
+    );
+    header.setUint16(
+      32,
+      _speechChannels * _speechBytesPerSample,
+      Endian.little,
+    );
+    header.setUint16(34, _speechBitsPerSample, Endian.little);
+    writeAscii(36, 'data');
+    header.setUint32(40, pcmBytes.length, Endian.little);
+    wavBytes.setRange(44, wavBytes.length, pcmBytes);
+    return wavBytes;
   }
 
   Future<void> editHistoryEntry(int index, String newText) async {
@@ -388,8 +631,13 @@ class ConversationController extends ChangeNotifier {
   @override
   void dispose() {
     unawaited(vitsPlayback.stop());
+    unawaited(_audioRecorder.dispose());
     super.dispose();
   }
 }
 
 const Set<String> _sentenceEndMarks = <String>{'。', '！', '？', '!', '?', '\n'};
+const int _speechSampleRate = 16000;
+const int _speechChannels = 1;
+const int _speechBitsPerSample = 16;
+const int _speechBytesPerSample = _speechBitsPerSample ~/ 8;

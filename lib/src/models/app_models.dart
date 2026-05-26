@@ -81,6 +81,67 @@ class VitsConfig {
   }
 }
 
+class SpeechInputConfig {
+  const SpeechInputConfig({
+    this.enable = false,
+    this.autoSend = false,
+    this.baiduApiKey = '',
+    this.baiduSecretKey = '',
+  });
+
+  final bool enable;
+  final bool autoSend;
+  final String baiduApiKey;
+  final String baiduSecretKey;
+
+  SpeechInputConfig copyWith({
+    bool? enable,
+    bool? autoSend,
+    String? baiduApiKey,
+    String? baiduSecretKey,
+  }) {
+    return SpeechInputConfig(
+      enable: enable ?? this.enable,
+      autoSend: autoSend ?? this.autoSend,
+      baiduApiKey: baiduApiKey ?? this.baiduApiKey,
+      baiduSecretKey: baiduSecretKey ?? this.baiduSecretKey,
+    );
+  }
+
+  factory SpeechInputConfig.fromJson(Map<String, dynamic> json) {
+    final Map<String, dynamic> baiduMap =
+        (json['Baidu'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+
+    return SpeechInputConfig(
+      enable: _parseBool(json['Enable']),
+      autoSend: _parseBool(json['AutoSend']),
+      baiduApiKey: (baiduMap['ApiKey'] as String?)?.trim() ?? '',
+      baiduSecretKey: (baiduMap['SecretKey'] as String?)?.trim() ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'Enable': enable,
+      'AutoSend': autoSend,
+      'Baidu': <String, dynamic>{
+        'ApiKey': baiduApiKey,
+        'SecretKey': baiduSecretKey,
+      },
+    };
+  }
+}
+
+bool _parseBool(Object? value) {
+  return switch (value) {
+    bool v => v,
+    String v => v.toLowerCase() == 'true',
+    int v => v != 0,
+    _ => false,
+  };
+}
+
 enum LlmProviderType {
   openAI,
   deepSeek;
@@ -124,10 +185,15 @@ enum LlmProviderType {
 }
 
 class AppConfig {
-  const AppConfig({required this.providers, required this.vits});
+  const AppConfig({
+    required this.providers,
+    required this.vits,
+    this.speechInput = const SpeechInputConfig(),
+  });
 
   final Map<LlmProviderType, ModelProviderConfig> providers;
   final VitsConfig vits;
+  final SpeechInputConfig speechInput;
 
   factory AppConfig.initial() {
     return AppConfig(
@@ -158,7 +224,15 @@ class AppConfig {
         (json['vits'] as Map?)?.cast<String, dynamic>() ??
         const <String, dynamic>{};
 
-    return AppConfig(providers: providers, vits: VitsConfig.fromJson(vitsMap));
+    final Map<String, dynamic> speechMap =
+        (json['speechInput'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+
+    return AppConfig(
+      providers: providers,
+      vits: VitsConfig.fromJson(vitsMap),
+      speechInput: SpeechInputConfig.fromJson(speechMap),
+    );
   }
 
   ModelProviderConfig providerConfig(LlmProviderType provider) {
@@ -182,13 +256,21 @@ class AppConfig {
     return AppConfig(providers: providers, vits: config);
   }
 
+  AppConfig copyWithSpeechInput(SpeechInputConfig config) {
+    return AppConfig(providers: providers, vits: vits, speechInput: config);
+  }
+
   Map<String, dynamic> toJson() {
     final Map<String, dynamic> llmMap = <String, dynamic>{};
     for (final LlmProviderType provider in LlmProviderType.values) {
       llmMap[provider.configKey] = providerConfig(provider).toJson();
     }
 
-    return <String, dynamic>{'llm': llmMap, 'vits': vits.toJson()};
+    return <String, dynamic>{
+      'llm': llmMap,
+      'vits': vits.toJson(),
+      'speechInput': speechInput.toJson(),
+    };
   }
 }
 
