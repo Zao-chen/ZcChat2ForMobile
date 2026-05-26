@@ -1,5 +1,6 @@
 ﻿import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/app_models.dart';
@@ -16,15 +17,20 @@ class OpenAiCompatibleLlmService implements LlmService {
 
   final http.Client _client;
 
-  Uri get _baseUri => Uri.parse(provider.baseUrl);
+  Uri getBaseUri() => Uri.parse(provider.baseUrl);
 
   @override
   Future<List<String>> fetchModels(String apiKey) async {
-    final http.Request request = http.Request('GET', _baseUri.resolve('models'))
-      ..headers.addAll(_headers(apiKey));
+    final Uri baseUri = getBaseUri();
+    final Uri requestUri = baseUri.resolve('models');
+    debugPrint('[LlmService] fetchModels baseUri=$baseUri requestUri=$requestUri');
+    final http.Request request = http.Request('GET', requestUri)
+      ..headers.addAll(_headers(apiKey))
+      ..headers['Accept'] = 'application/json';
 
     final http.StreamedResponse response = await _client.send(request);
     final String body = await response.stream.bytesToString();
+    debugPrint('[LlmService] fetchModels status=${response.statusCode} body=$body');
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw LlmException(_extractError(body, fallback: '获取模型列表失败'));
     }
@@ -47,7 +53,7 @@ class OpenAiCompatibleLlmService implements LlmService {
   @override
   Stream<ChatStreamEvent> chatStream(ChatRequest request) async* {
     final http.Request httpRequest =
-        http.Request('POST', _baseUri.resolve('chat/completions'))
+        http.Request('POST', getBaseUri().resolve('chat/completions'))
           ..headers.addAll(_headers(request.apiKey))
           ..body = jsonEncode(
             <String, dynamic>{
@@ -165,4 +171,24 @@ class OpenAiLlmService extends OpenAiCompatibleLlmService {
 class DeepSeekLlmService extends OpenAiCompatibleLlmService {
   DeepSeekLlmService({super.client})
       : super(provider: LlmProviderType.deepSeek);
+}
+
+class CustomLlmService extends OpenAiCompatibleLlmService {
+  CustomLlmService({String baseUrl = '', super.client})
+      : _customBaseUrl = baseUrl,
+        super(provider: LlmProviderType.custom);
+
+  String _customBaseUrl;
+
+  void updateBaseUrl(String baseUrl) {
+    _customBaseUrl = baseUrl;
+  }
+
+  @override
+  Uri getBaseUri() {
+    final String url = _customBaseUrl.endsWith('/')
+        ? _customBaseUrl
+        : '$_customBaseUrl/';
+    return Uri.parse(url);
+  }
 }

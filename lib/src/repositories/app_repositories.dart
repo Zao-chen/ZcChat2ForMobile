@@ -121,6 +121,17 @@ class SettingsRepository {
     await saveAppConfig(config.copyWithProvider(provider, updated));
   }
 
+  Future<void> saveProviderBaseUrl(
+    LlmProviderType provider,
+    String baseUrl,
+  ) async {
+    final AppConfig config = await loadAppConfig();
+    final ModelProviderConfig updated = config
+        .providerConfig(provider)
+        .copyWith(baseUrl: baseUrl.trim());
+    await saveAppConfig(config.copyWithProvider(provider, updated));
+  }
+
   Future<void> saveVitsApiUrl(String apiUrl) async {
     final AppConfig config = await loadAppConfig();
     await saveAppConfig(
@@ -753,6 +764,17 @@ class WebPreviewSettingsRepository extends SettingsRepository {
     final ModelProviderConfig updated = _config
         .providerConfig(provider)
         .copyWith(models: models.toList(growable: false));
+    await saveAppConfig(_config.copyWithProvider(provider, updated));
+  }
+
+  @override
+  Future<void> saveProviderBaseUrl(
+    LlmProviderType provider,
+    String baseUrl,
+  ) async {
+    final ModelProviderConfig updated = _config
+        .providerConfig(provider)
+        .copyWith(baseUrl: baseUrl.trim());
     await saveAppConfig(_config.copyWithProvider(provider, updated));
   }
 

@@ -15,6 +15,7 @@ import '../models/app_models.dart';
 import '../models/anime_plugin_models.dart';
 import '../repositories/app_repositories.dart';
 import '../services/llm_service.dart';
+import '../services/openai_compatible_llm_service.dart';
 import '../services/vits_service.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -879,10 +880,14 @@ class LlmSettingsHomePage extends StatelessWidget {
           for (final LlmProviderType provider in LlmProviderType.values)
             _SettingsEntry(
               title: provider.label,
-              subtitle: '配置 API Key 并获取模型列表',
+              subtitle: provider == LlmProviderType.custom
+                  ? '配置兼容 OpenAI 接口格式的自定义服务'
+                  : '配置 API Key 并获取模型列表',
               icon: provider == LlmProviderType.openAI
                   ? Icons.auto_awesome_outlined
-                  : Icons.memory_rounded,
+                  : provider == LlmProviderType.custom
+                      ? Icons.dns_rounded
+                      : Icons.memory_rounded,
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute<void>(
@@ -919,6 +924,7 @@ class ProviderSettingsPage extends StatefulWidget {
 
 class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
   final TextEditingController _apiKeyController = TextEditingController();
+  final TextEditingController _baseUrlController = TextEditingController();
 
   bool _isLoading = true;
   bool _isFetchingModels = false;
@@ -933,6 +939,7 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
   @override
   void dispose() {
     _apiKeyController.dispose();
+    _baseUrlController.dispose();
     super.dispose();
   }
 
@@ -940,6 +947,7 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
     final AppConfig config = await widget.settingsRepository.loadAppConfig();
     _appConfig = config;
     _apiKeyController.text = config.providerConfig(widget.provider).apiKey;
+    _baseUrlController.text = config.providerConfig(widget.provider).baseUrl;
     if (mounted) {
       setState(() {
         _isLoading = false;
@@ -952,11 +960,28 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
     _appConfig = await widget.settingsRepository.loadAppConfig();
   }
 
+  Future<void> _saveBaseUrl(String value) async {
+    await widget.settingsRepository.saveProviderBaseUrl(widget.provider, value);
+    _appConfig = await widget.settingsRepository.loadAppConfig();
+  }
+
   Future<void> _fetchModels() async {
     final String apiKey = _apiKeyController.text.trim();
     if (apiKey.isEmpty) {
       _showSnackBar('请先填写 API Key');
       return;
+    }
+
+    if (widget.provider == LlmProviderType.custom) {
+      final String baseUrl = _baseUrlController.text.trim();
+      if (baseUrl.isEmpty) {
+        _showSnackBar('请先填写 Base URL');
+        return;
+      }
+      if (widget.service is CustomLlmService) {
+        debugPrint('[Settings] CustomLlmService.updateBaseUrl: $baseUrl');
+        (widget.service as CustomLlmService).updateBaseUrl(baseUrl);
+      }
     }
 
     setState(() {
@@ -1023,6 +1048,21 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
               onChanged: _saveApiKey,
             ),
           ),
+          if (widget.provider == LlmProviderType.custom) ...<Widget>[
+            const SizedBox(height: 16),
+            _SettingsSection(
+              title: 'Base URL',
+              child: TextField(
+                controller: _baseUrlController,
+                decoration: const InputDecoration(
+                  labelText: 'Base URL',
+                  hintText: '例如 http://127.0.0.1:11434/v1',
+                  filled: true,
+                ),
+                onChanged: _saveBaseUrl,
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           _SettingsSection(
             title: '模型列表',

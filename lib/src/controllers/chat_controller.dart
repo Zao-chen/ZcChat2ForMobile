@@ -13,6 +13,7 @@ import '../models/anime_plugin_models.dart';
 import '../repositories/app_repositories.dart';
 import '../services/baidu_speech_service.dart';
 import '../services/llm_service.dart';
+import '../services/openai_compatible_llm_service.dart';
 import '../services/vits_service.dart';
 
 class ConversationController extends ChangeNotifier {
@@ -95,9 +96,15 @@ class ConversationController extends ChangeNotifier {
     final ModelProviderConfig providerConfig = appConfig.providerConfig(
       runtimeConfig.provider,
     );
-    if (providerConfig.apiKey.isEmpty || runtimeConfig.modelSelect.isEmpty) {
+    final bool configIncomplete = providerConfig.apiKey.isEmpty ||
+        runtimeConfig.modelSelect.isEmpty ||
+        (runtimeConfig.provider == LlmProviderType.custom &&
+            providerConfig.baseUrl.isEmpty);
+    if (configIncomplete) {
       currentMood = 'default';
-      currentDisplayText = '请先在设置页配置服务商、API Key 和模型。';
+      currentDisplayText = runtimeConfig.provider == LlmProviderType.custom
+          ? '请先在设置页配置服务商、API Key、Base URL 和模型。'
+          : '请先在设置页配置服务商、API Key 和模型。';
       showContinueButton = true;
       isSending = false;
       currentTachieFile = await characterRepository.resolveTachieFile(
@@ -109,6 +116,12 @@ class ConversationController extends ChangeNotifier {
     }
 
     await vitsPlayback.stop();
+    if (runtimeConfig.provider == LlmProviderType.custom) {
+      final LlmService? customService = services[LlmProviderType.custom];
+      if (customService is CustomLlmService) {
+        customService.updateBaseUrl(providerConfig.baseUrl);
+      }
+    }
     final LlmService service = services[runtimeConfig.provider]!;
     final List<String> moods = await characterRepository.getTachieMoodNames(
       selectedCharacter,
