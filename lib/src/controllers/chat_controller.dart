@@ -187,6 +187,27 @@ class ConversationController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 回溯到指定历史记录索引（匹配 Qt 行为）：截断历史并显示选中条目的内容。
+  Future<void> rewindToHistoryIndex(int historyIndex) async {
+    if (historyIndex < 0 || historyIndex >= history.entries.length) {
+      return;
+    }
+
+    await vitsPlayback.stop();
+    await conversationRepository.rollbackTo(historyIndex + 1);
+    history = await conversationRepository.loadHistory(selectedCharacter);
+
+    final HistoryEntry selected = history.entries[historyIndex];
+    currentMood = 'default';
+    currentDisplayText = selected.text;
+    showContinueButton = selected.speaker != HistorySpeaker.user;
+    currentTachieFile = await characterRepository.resolveTachieFile(
+      selectedCharacter,
+      currentMood,
+    );
+    notifyListeners();
+  }
+
   /// 撤销最后一轮对话（移除最后一条用户消息和角色回复）。
   /// 如果最后一条是角色回复，则同时删除它和它前面的用户消息。
   Future<void> undoLastTurn() async {
