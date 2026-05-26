@@ -145,6 +145,11 @@ class SettingsRepository {
       config.copyWithVits(config.vits.copyWith(sentenceSplit: enabled)),
     );
   }
+
+  Future<void> saveSpeechInputConfig(SpeechInputConfig speechInput) async {
+    final AppConfig config = await loadAppConfig();
+    await saveAppConfig(config.copyWithSpeechInput(speechInput));
+  }
 }
 
 class CharacterRepository {
@@ -774,6 +779,11 @@ class WebPreviewSettingsRepository extends SettingsRepository {
     await saveAppConfig(
       _config.copyWithVits(_config.vits.copyWith(sentenceSplit: enabled)),
     );
+  }
+
+  @override
+  Future<void> saveSpeechInputConfig(SpeechInputConfig speechInput) async {
+    await saveAppConfig(_config.copyWithSpeechInput(speechInput));
   }
 }
 

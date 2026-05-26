@@ -1,4 +1,5 @@
-﻿import 'dart:io';
+import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -60,9 +61,20 @@ class _ConversationPageState extends State<ConversationPage> {
   }
 
   void _syncInputController() {
-    final bool locked =
-        widget.controller.isSending || widget.controller.showContinueButton;
-    final String nextText = locked ? widget.controller.currentDisplayText : '';
+    final ConversationController controller = widget.controller;
+
+    if (controller.pendingInputText.isNotEmpty) {
+      final String pending = controller.pendingInputText;
+      controller.pendingInputText = '';
+      _inputController.value = TextEditingValue(
+        text: pending,
+        selection: TextSelection.collapsed(offset: pending.length),
+      );
+      return;
+    }
+
+    final bool locked = controller.isSending || controller.showContinueButton;
+    final String nextText = locked ? controller.currentDisplayText : '';
     if (_inputController.text == nextText) {
       return;
     }
@@ -172,10 +184,7 @@ class _ConversationPageState extends State<ConversationPage> {
 
     _historyOverlay = OverlayEntry(
       builder: (BuildContext overlayContext) {
-        return _HistoryPopup(
-          entries: entries,
-          onRollback: _rollbackTo,
-        );
+        return _HistoryPopup(entries: entries, onRollback: _rollbackTo);
       },
     );
 
@@ -192,6 +201,10 @@ class _ConversationPageState extends State<ConversationPage> {
     await widget.controller.rewindToHistoryIndex(index);
   }
 
+  void _stopRecordingFromPointerEvent() {
+    unawaited(widget.controller.stopRecording());
+  }
+
   @override
   Widget build(BuildContext context) {
     final ConversationController controller = widget.controller;
@@ -202,77 +215,101 @@ class _ConversationPageState extends State<ConversationPage> {
     return Scaffold(
       resizeToAvoidBottomInset: false,
       body: SafeArea(
-        child: controller.isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : Stack(
-                children: <Widget>[
-                  Positioned.fill(
-                    child: Column(
-                      children: <Widget>[
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
-                          child: Row(
-                            children: <Widget>[
-                              const Spacer(),
-                              IconButton(
-                                onPressed: _openSettings,
-                                icon: const Icon(Icons.settings_rounded),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(
-                              left: 12,
-                              right: 12,
-                              bottom: dialogReservedHeight,
+        child: Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerUp: (_) => _stopRecordingFromPointerEvent(),
+          child: controller.isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : Stack(
+                  children: <Widget>[
+                    Positioned.fill(
+                      child: Column(
+                        children: <Widget>[
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
+                            child: Row(
+                              children: <Widget>[
+                                const Spacer(),
+                                IconButton(
+                                  onPressed: _openSettings,
+                                  icon: const Icon(Icons.settings_rounded),
+                                ),
+                              ],
                             ),
-                            child: Center(
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.translucent,
-                                onScaleStart: _handleTachieScaleStart,
-                                onScaleUpdate: _handleTachieScaleUpdate,
-                                onScaleEnd: _handleTachieScaleEnd,
-                                onDoubleTap: _resetTachieTransform,
-                                child: Transform.translate(
-                                  offset: _tachieOffset,
-                                  child: AnimatedSwitcher(
-                                    duration: const Duration(milliseconds: 250),
-                                    child: _TachieDisplay(
-                                      key: ValueKey<String>(
-                                        '${controller.currentTachieFile?.path ?? 'web'}|${controller.currentMood}',
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(
+                                left: 12,
+                                right: 12,
+                                bottom: dialogReservedHeight,
+                              ),
+                              child: Center(
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.translucent,
+                                  onScaleStart: _handleTachieScaleStart,
+                                  onScaleUpdate: _handleTachieScaleUpdate,
+                                  onScaleEnd: _handleTachieScaleEnd,
+                                  onDoubleTap: _resetTachieTransform,
+                                  child: Transform.translate(
+                                    offset: _tachieOffset,
+                                    child: AnimatedSwitcher(
+                                      duration: const Duration(
+                                        milliseconds: 250,
                                       ),
-                                      file: controller.currentTachieFile,
-                                      mood: controller.currentMood,
-                                      scale: _tachieScale,
-                                      pluginAnimation: _activePluginAnimation,
+                                      child: _TachieDisplay(
+                                        key: ValueKey<String>(
+                                          '${controller.currentTachieFile?.path ?? 'web'}|${controller.currentMood}',
+                                        ),
+                                        file: controller.currentTachieFile,
+                                        mood: controller.currentMood,
+                                        scale: _tachieScale,
+                                        pluginAnimation: _activePluginAnimation,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  AnimatedPositioned(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOut,
-                    left: 14,
-                    right: 14,
-                    bottom: dialogBottom,
-                    child: _DialogPanel(
-                      characterName: controller.selectedCharacter,
-                      inputController: _inputController,
-                      isSending: controller.isSending,
-                      onSubmitted: _submitInput,
-                      onHistory: _showHistorySheet,
+                    AnimatedPositioned(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      left: 14,
+                      right: 14,
+                      bottom: dialogBottom,
+                      child: _DialogPanel(
+                        characterName: controller.selectedCharacter,
+                        inputController: _inputController,
+                        isSending: controller.isSending,
+                        isRecording: controller.isRecording,
+                        isRecognizing: controller.isRecognizing,
+                        speechEnabled: controller.appConfig.speechInput.enable,
+                        autoSend: controller.appConfig.speechInput.autoSend,
+                        onSubmitted: _submitInput,
+                        onHistory: _showHistorySheet,
+                        onAutoSendChanged: (bool? value) {
+                          final SpeechInputConfig old =
+                              controller.appConfig.speechInput;
+                          controller.appConfig = controller.appConfig
+                              .copyWithSpeechInput(
+                                old.copyWith(autoSend: value ?? false),
+                              );
+                          controller.settingsRepository.saveSpeechInputConfig(
+                            controller.appConfig.speechInput,
+                          );
+                          setState(() {});
+                        },
+                        onRecordStart: controller.startRecording,
+                        onRecordStop: controller.stopRecording,
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
+        ),
       ),
     );
   }
@@ -283,15 +320,29 @@ class _DialogPanel extends StatelessWidget {
     required this.characterName,
     required this.inputController,
     required this.isSending,
+    required this.isRecording,
+    required this.isRecognizing,
+    required this.speechEnabled,
+    required this.autoSend,
     required this.onSubmitted,
     required this.onHistory,
+    required this.onAutoSendChanged,
+    required this.onRecordStart,
+    required this.onRecordStop,
   });
 
   final String characterName;
   final TextEditingController inputController;
   final bool isSending;
+  final bool isRecording;
+  final bool isRecognizing;
+  final bool speechEnabled;
+  final bool autoSend;
   final Future<void> Function() onSubmitted;
   final VoidCallback onHistory;
+  final ValueChanged<bool?> onAutoSendChanged;
+  final AsyncCallback onRecordStart;
+  final AsyncCallback onRecordStop;
 
   @override
   Widget build(BuildContext context) {
@@ -341,6 +392,53 @@ class _DialogPanel extends StatelessWidget {
             ),
             Row(
               children: <Widget>[
+                if (speechEnabled) ...<Widget>[
+                  _MicRecordButton(
+                    onRecordStart: onRecordStart,
+                    onRecordStop: onRecordStop,
+                    isRecording: isRecording,
+                  ),
+                  const SizedBox(width: 2),
+                  SizedBox(
+                    height: 32,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: Checkbox(
+                            value: autoSend,
+                            onChanged: onAutoSendChanged,
+                            activeColor: const Color(0xFF888888),
+                            side: const BorderSide(color: Color(0xFF888888)),
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        const Text(
+                          '直接发送',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF888888),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (isRecording || isRecognizing) ...<Widget>[
+                    const SizedBox(width: 8),
+                    Text(
+                      isRecognizing ? '识别中...' : '录音中...',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF888888),
+                      ),
+                    ),
+                  ],
+                ],
                 const Spacer(),
                 _QtStyleButton(
                   tooltip: '历史记录',
@@ -630,10 +728,7 @@ class _TachiePlaceholder extends StatelessWidget {
 }
 
 class _HistoryPopup extends StatefulWidget {
-  const _HistoryPopup({
-    required this.entries,
-    required this.onRollback,
-  });
+  const _HistoryPopup({required this.entries, required this.onRollback});
 
   final List<HistoryEntry> entries;
   final Future<void> Function(int index) onRollback;
@@ -783,16 +878,86 @@ class _HistoryEntryRow extends StatelessWidget {
                 const SizedBox(height: 4),
                 Expanded(
                   child: SingleChildScrollView(
-                    child: Text(
-                      message,
-                      style: const TextStyle(fontSize: 11),
-                    ),
+                    child: Text(message, style: const TextStyle(fontSize: 11)),
                   ),
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MicRecordButton extends StatefulWidget {
+  const _MicRecordButton({
+    required this.onRecordStart,
+    required this.onRecordStop,
+    required this.isRecording,
+  });
+
+  final AsyncCallback onRecordStart;
+  final AsyncCallback onRecordStop;
+  final bool isRecording;
+
+  @override
+  State<_MicRecordButton> createState() => _MicRecordButtonState();
+}
+
+class _MicRecordButtonState extends State<_MicRecordButton> {
+  bool _hovered = false;
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color borderColor = widget.isRecording
+        ? const Color(0xFFAAAAAA)
+        : _pressed
+        ? const Color(0xFFAAAAAA)
+        : _hovered
+        ? const Color(0xFFCCCCCC)
+        : Colors.transparent;
+
+    return Tooltip(
+      message: '长按录音',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) {
+          if (_hovered || _pressed) {
+            setState(() {
+              _hovered = false;
+              _pressed = false;
+            });
+          }
+        },
+        child: Listener(
+          onPointerDown: (_) {
+            setState(() => _pressed = true);
+            unawaited(widget.onRecordStart());
+          },
+          onPointerUp: (_) {
+            setState(() => _pressed = false);
+            unawaited(widget.onRecordStop());
+          },
+          onPointerCancel: (_) {
+            setState(() => _pressed = false);
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 100),
+            decoration: BoxDecoration(
+              border: Border.all(color: borderColor, width: 2),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            padding: const EdgeInsets.all(6),
+            child: SvgPicture.asset(
+              'assets/microphone-solid.svg',
+              width: 18,
+              height: 18,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -843,11 +1008,7 @@ class _QtStyleButtonState extends State<_QtStyleButton> {
               borderRadius: BorderRadius.circular(5),
             ),
             padding: const EdgeInsets.all(6),
-            child: SvgPicture.asset(
-              widget.assetPath,
-              width: 18,
-              height: 18,
-            ),
+            child: SvgPicture.asset(widget.assetPath, width: 18, height: 18),
           ),
         ),
       ),
