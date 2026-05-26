@@ -34,6 +34,7 @@ class _ConversationPageState extends State<ConversationPage> {
   String _lastAnimationBindingKey = '';
   AnimePluginAnimation? _activePluginAnimation;
   OverlayEntry? _historyOverlay;
+  final GlobalKey<_HistoryPopupState> _historyPopupKey = GlobalKey();
 
   @override
   void initState() {
@@ -184,7 +185,12 @@ class _ConversationPageState extends State<ConversationPage> {
 
     _historyOverlay = OverlayEntry(
       builder: (BuildContext overlayContext) {
-        return _HistoryPopup(entries: entries, onRollback: _rollbackTo);
+        return _HistoryPopup(
+          key: _historyPopupKey,
+          entries: entries,
+          onRollback: _rollbackTo,
+          onClose: _removeHistoryOverlay,
+        );
       },
     );
 
@@ -192,6 +198,10 @@ class _ConversationPageState extends State<ConversationPage> {
   }
 
   void _closeHistoryPopup() {
+    _historyPopupKey.currentState?.close();
+  }
+
+  void _removeHistoryOverlay() {
     _historyOverlay?.remove();
     _historyOverlay = null;
   }
@@ -728,10 +738,16 @@ class _TachiePlaceholder extends StatelessWidget {
 }
 
 class _HistoryPopup extends StatefulWidget {
-  const _HistoryPopup({required this.entries, required this.onRollback});
+  const _HistoryPopup({
+    required this.entries,
+    required this.onRollback,
+    required this.onClose,
+    super.key,
+  });
 
   final List<HistoryEntry> entries;
   final Future<void> Function(int index) onRollback;
+  final VoidCallback onClose;
 
   @override
   State<_HistoryPopup> createState() => _HistoryPopupState();
@@ -743,6 +759,7 @@ class _HistoryPopupState extends State<_HistoryPopup>
   late final Animation<double> _opacity;
   late final Animation<Offset> _offset;
   final ScrollController _scrollController = ScrollController();
+  bool _isClosing = false;
 
   @override
   void initState() {
@@ -757,6 +774,13 @@ class _HistoryPopupState extends State<_HistoryPopup>
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
     _animController.forward();
+  }
+
+  Future<void> close() async {
+    if (_isClosing) return;
+    _isClosing = true;
+    await _animController.reverse();
+    widget.onClose();
   }
 
   @override
