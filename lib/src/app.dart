@@ -62,6 +62,7 @@ class _ZcChatAppState extends State<ZcChatApp> {
     _services = <LlmProviderType, LlmService>{
       LlmProviderType.openAI: OpenAiLlmService(),
       LlmProviderType.deepSeek: DeepSeekLlmService(),
+      LlmProviderType.custom: CustomLlmService(),
     };
     _vitsService = VitsSimpleApiService();
     _vitsPlayback =

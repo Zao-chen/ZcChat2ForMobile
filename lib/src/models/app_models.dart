@@ -1,12 +1,22 @@
 ﻿class ModelProviderConfig {
-  const ModelProviderConfig({this.apiKey = '', this.models = const <String>[]});
+  const ModelProviderConfig({
+    this.apiKey = '',
+    this.baseUrl = '',
+    this.models = const <String>[],
+  });
 
   final String apiKey;
+  final String baseUrl;
   final List<String> models;
 
-  ModelProviderConfig copyWith({String? apiKey, List<String>? models}) {
+  ModelProviderConfig copyWith({
+    String? apiKey,
+    String? baseUrl,
+    List<String>? models,
+  }) {
     return ModelProviderConfig(
       apiKey: apiKey ?? this.apiKey,
+      baseUrl: baseUrl ?? this.baseUrl,
       models: models ?? this.models,
     );
   }
@@ -19,12 +29,17 @@
 
     return ModelProviderConfig(
       apiKey: (json['ApiKey'] as String?)?.trim() ?? '',
+      baseUrl: (json['BaseUrl'] as String?)?.trim() ?? '',
       models: modelList,
     );
   }
 
   Map<String, dynamic> toJson() {
-    return <String, dynamic>{'ApiKey': apiKey, 'ModelList': models};
+    return <String, dynamic>{
+      'ApiKey': apiKey,
+      'BaseUrl': baseUrl,
+      'ModelList': models,
+    };
   }
 }
 
@@ -144,7 +159,8 @@ bool _parseBool(Object? value) {
 
 enum LlmProviderType {
   openAI,
-  deepSeek;
+  deepSeek,
+  custom;
 
   String get configKey {
     switch (this) {
@@ -152,6 +168,8 @@ enum LlmProviderType {
         return 'OpenAI';
       case LlmProviderType.deepSeek:
         return 'DeepSeek';
+      case LlmProviderType.custom:
+        return 'Custom';
     }
   }
 
@@ -161,6 +179,8 @@ enum LlmProviderType {
         return 'OpenAI';
       case LlmProviderType.deepSeek:
         return 'DeepSeek';
+      case LlmProviderType.custom:
+        return '自定义';
     }
   }
 
@@ -170,6 +190,8 @@ enum LlmProviderType {
         return 'https://api.openai.com/v1/';
       case LlmProviderType.deepSeek:
         return 'https://api.deepseek.com/v1/';
+      case LlmProviderType.custom:
+        return '';
     }
   }
 
@@ -177,6 +199,8 @@ enum LlmProviderType {
     switch (value) {
       case 'OpenAI':
         return LlmProviderType.openAI;
+      case 'Custom':
+        return LlmProviderType.custom;
       case 'DeepSeek':
       default:
         return LlmProviderType.deepSeek;
@@ -200,6 +224,7 @@ class AppConfig {
       providers: <LlmProviderType, ModelProviderConfig>{
         LlmProviderType.openAI: const ModelProviderConfig(),
         LlmProviderType.deepSeek: const ModelProviderConfig(),
+        LlmProviderType.custom: const ModelProviderConfig(),
       },
       vits: const VitsConfig(),
     );
