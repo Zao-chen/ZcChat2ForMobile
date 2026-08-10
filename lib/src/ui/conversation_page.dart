@@ -222,8 +222,8 @@ class _ConversationPageState extends State<ConversationPage> {
   Widget build(BuildContext context) {
     final ConversationController controller = widget.controller;
     final double keyboardInset = MediaQuery.of(context).viewInsets.bottom;
-    final double dialogBottom = math.max(12, keyboardInset + 12);
-    const double dialogReservedHeight = 206;
+    final double dialogBottom = math.max(16, keyboardInset + 16);
+    const double dialogReservedHeight = 222;
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -291,8 +291,8 @@ class _ConversationPageState extends State<ConversationPage> {
                     AnimatedPositioned(
                       duration: const Duration(milliseconds: 180),
                       curve: Curves.easeOut,
-                      left: 12,
-                      right: 12,
+                      left: 16,
+                      right: 16,
                       bottom: dialogBottom,
                       child: _DialogPanel(
                         inputController: _inputController,
@@ -397,16 +397,7 @@ class _DialogPanel extends StatelessWidget {
         ? '轻触这里继续对话'
         : '说点什么吧 (Shift+Enter换行 Enter发送)';
     return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: colors.shadow.withValues(alpha: 0.18),
-            blurRadius: 26,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(18)),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(18),
         child: BackdropFilter(
@@ -1012,7 +1003,7 @@ class _HistoryPopupState extends State<_HistoryPopup>
       left: 14,
       right: 14,
       top: 15,
-      bottom: 206 + MediaQuery.of(context).viewInsets.bottom + 12,
+      bottom: 222 + MediaQuery.of(context).viewInsets.bottom + 12,
       child: SlideTransition(
         position: _offset,
         child: FadeTransition(
