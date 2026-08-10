@@ -137,7 +137,7 @@ class VitsSimpleApiService implements VitsService {
 
     return _ParsedModelAndSpeaker(
       model: parts.first.toLowerCase(),
-      speaker: parts.sublist(2).join(' - '),
+      speaker: parts[1],
     );
   }
 
