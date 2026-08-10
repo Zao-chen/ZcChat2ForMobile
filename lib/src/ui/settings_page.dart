@@ -513,7 +513,7 @@ class _AboutPageState extends State<AboutPage> {
     final bool hasNewVersion =
         _latestTagName != null &&
         _latestTagName!.isNotEmpty &&
-        _latestTagName != _appVersion;
+        isVersionNewer(_latestTagName!, _appVersion);
     final String updateButtonText = _isDownloadingApk
         ? (_downloadProgressKnown
               ? '下载中 ${(100 * _downloadProgress).toStringAsFixed(0)}%'
