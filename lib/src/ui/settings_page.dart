@@ -1671,6 +1671,9 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
         .characterRepository
         .loadCharacterRuntimeConfig(selectedCharacter);
     final AppConfig appConfig = await widget.settingsRepository.loadAppConfig();
+    if (!mounted) {
+      return;
+    }
 
     _characters = characters;
     _selectedCharacter = selectedCharacter;
@@ -1693,11 +1696,9 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
     ).toString();
     _contextLimitStatus = _contextLimitStatusFor(runtimeConfig);
 
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
-    }
+    setState(() {
+      _isLoading = false;
+    });
     if (_shouldResolveContextLimit(runtimeConfig)) {
       unawaited(_resolveContextTokenLimit());
     }
@@ -1861,6 +1862,9 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
       model: model,
       provider: _runtimeConfig.serverSelect,
     );
+    if (!mounted) {
+      return;
+    }
     await _resolveContextTokenLimit();
   }
 
@@ -1909,6 +1913,7 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
   }
 
   Future<void> _resolveContextTokenLimit({bool forceRefresh = false}) async {
+    final String requestedCharacter = _selectedCharacter;
     final String requestedModel = _runtimeConfig.modelSelect.trim();
     final LlmProviderType requestedProvider = _runtimeConfig.provider;
     if (requestedModel.isEmpty) {
@@ -1930,6 +1935,7 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
         forceRefresh: forceRefresh,
       );
       if (!mounted ||
+          _selectedCharacter != requestedCharacter ||
           _runtimeConfig.modelSelect.trim().toLowerCase() !=
               requestedModel.toLowerCase() ||
           _runtimeConfig.provider != requestedProvider) {
@@ -1946,13 +1952,17 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
         ContextTokenEstimator.maximumContextTokenLimit,
       );
       await widget.characterRepository.saveCharacterContextTokenLimit(
-        _selectedCharacter,
+        requestedCharacter,
         tokenLimit: tokenLimit,
         source: 'models.dev',
         model: requestedModel,
-        provider: _runtimeConfig.serverSelect,
+        provider: requestedProvider.configKey,
       );
-      if (!mounted) {
+      if (!mounted ||
+          _selectedCharacter != requestedCharacter ||
+          _runtimeConfig.modelSelect.trim().toLowerCase() !=
+              requestedModel.toLowerCase() ||
+          _runtimeConfig.provider != requestedProvider) {
         return;
       }
       setState(() {
@@ -1960,7 +1970,7 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
           contextTokenLimit: tokenLimit,
           contextTokenLimitSource: 'models.dev',
           contextTokenModel: requestedModel,
-          contextTokenProvider: _runtimeConfig.serverSelect,
+          contextTokenProvider: requestedProvider.configKey,
         );
         _contextTokenLimitController.text = tokenLimit.toString();
         _contextLimitStatus = '已根据 Models.dev 自动识别：${match.canonicalModelId}';
@@ -1981,7 +1991,11 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
         stackTrace: stackTrace,
         fields: <String, Object?>{'model': requestedModel},
       );
-      if (mounted) {
+      if (mounted &&
+          _selectedCharacter == requestedCharacter &&
+          _runtimeConfig.modelSelect.trim().toLowerCase() ==
+              requestedModel.toLowerCase() &&
+          _runtimeConfig.provider == requestedProvider) {
         setState(() {
           _contextLimitStatus = 'Models.dev 访问失败，保留当前值';
         });
