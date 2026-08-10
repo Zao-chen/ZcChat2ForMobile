@@ -16,6 +16,7 @@ import '../models/app_models.dart';
 import '../models/anime_plugin_models.dart';
 import '../repositories/app_repositories.dart';
 import '../services/app_logger.dart';
+import '../services/app_version.dart';
 import '../services/context_history_compressor.dart';
 import '../services/context_token_estimator.dart';
 import '../services/llm_service.dart';
@@ -212,7 +213,9 @@ class _AboutPageState extends State<AboutPage> {
     }
 
     try {
-      final http.Response response = await http.get(_releaseApiUri);
+      final http.Response response = await http
+          .get(_releaseApiUri)
+          .timeout(const Duration(seconds: 15));
       if (response.statusCode != 200) {
         throw Exception('请求失败(${response.statusCode})');
       }
@@ -223,12 +226,17 @@ class _AboutPageState extends State<AboutPage> {
       }
 
       final List<_ReleaseInfo> releaseList = <_ReleaseInfo>[];
+      Map<dynamic, dynamic>? latestRelease;
       bool matchedCurrentVersion = false;
       for (final Object item in decoded) {
         if (item is! Map) {
           continue;
         }
         final Map<dynamic, dynamic> rawMap = item;
+        if (rawMap['draft'] == true || rawMap['prerelease'] == true) {
+          continue;
+        }
+        latestRelease ??= rawMap;
         final String tagName = _normalizeVersion(
           rawMap['tag_name']?.toString() ?? '',
         );
@@ -262,14 +270,12 @@ class _AboutPageState extends State<AboutPage> {
       Uri? latestUrl;
       Uri? latestApkUrl;
       String? latestTag;
-      if (releaseList.isNotEmpty && decoded.first is Map) {
+      if (releaseList.isNotEmpty && latestRelease != null) {
         latestTag = releaseList.first.version;
         if (releaseList.first.htmlUrl.isNotEmpty) {
           latestUrl = Uri.tryParse(releaseList.first.htmlUrl);
         }
-        final Map<dynamic, dynamic> firstRelease =
-            decoded.first as Map<dynamic, dynamic>;
-        final Object? assetsObj = firstRelease['assets'];
+        final Object? assetsObj = latestRelease['assets'];
         if (assetsObj is List) {
           for (final Object assetObj in assetsObj) {
             if (assetObj is! Map) {
@@ -294,10 +300,10 @@ class _AboutPageState extends State<AboutPage> {
       final String statusText;
       if (latestTag == null || latestTag.isEmpty) {
         statusText = '获取新版本失败';
-      } else if (latestTag != _appVersion) {
+      } else if (isVersionNewer(latestTag, _appVersion)) {
         statusText = '发现新版本 v$latestTag';
       } else {
-        statusText = '当前为最新正式版';
+        statusText = '当前版本不低于最新正式版';
       }
 
       if (!mounted) {
@@ -380,7 +386,7 @@ class _AboutPageState extends State<AboutPage> {
     final bool hasNewVersion =
         _latestTagName != null &&
         _latestTagName!.isNotEmpty &&
-        _latestTagName != _appVersion;
+        isVersionNewer(_latestTagName!, _appVersion);
     if (!kIsWeb && hasNewVersion && _latestApkUrl != null) {
       await _downloadAndInstallLatestApk();
       return;
@@ -412,7 +418,9 @@ class _AboutPageState extends State<AboutPage> {
         fields: <String, Object?>{'url': _latestApkUrl},
       );
       final http.Request request = http.Request('GET', _latestApkUrl!);
-      final http.StreamedResponse response = await client.send(request);
+      final http.StreamedResponse response = await client
+          .send(request)
+          .timeout(const Duration(seconds: 20));
       if (response.statusCode != 200) {
         throw Exception('下载失败(${response.statusCode})');
       }
@@ -453,6 +461,10 @@ class _AboutPageState extends State<AboutPage> {
       await sink.flush();
       await sink.close();
       sink = null;
+      if (received == 0 || (total > 0 && received != total)) {
+        await apkFile.delete();
+        throw const FormatException('下载文件不完整');
+      }
       AppLogger.info(
         'update.download.completed',
         fields: <String, Object?>{'file': apkFile.path, 'bytes': received},
