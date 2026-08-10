@@ -1,3 +1,15 @@
+List<String> normalizeModelIds(Iterable<String> models) {
+  final Set<String> seen = <String>{};
+  final List<String> normalized = <String>[];
+  for (final String rawModel in models) {
+    final String model = rawModel.trim();
+    if (model.isNotEmpty && seen.add(model)) {
+      normalized.add(model);
+    }
+  }
+  return List<String>.unmodifiable(normalized);
+}
+
 class ModelProviderConfig {
   const ModelProviderConfig({
     this.apiKey = '',
@@ -17,14 +29,14 @@ class ModelProviderConfig {
     return ModelProviderConfig(
       apiKey: apiKey ?? this.apiKey,
       baseUrl: baseUrl ?? this.baseUrl,
-      models: models ?? this.models,
+      models: models == null ? this.models : normalizeModelIds(models),
     );
   }
 
   factory ModelProviderConfig.fromJson(Map<String, dynamic> json) {
     final Object? rawModels = json['ModelList'];
     final List<String> modelList = rawModels is List
-        ? rawModels.whereType<String>().toList(growable: false)
+        ? normalizeModelIds(rawModels.whereType<String>())
         : const <String>[];
 
     return ModelProviderConfig(

@@ -54,11 +54,9 @@ class OpenAiCompatibleLlmService implements LlmService {
       return const <String>[];
     }
 
-    final List<String> models = data
-        .whereType<Map>()
-        .map((Map model) => model['id'])
-        .whereType<String>()
-        .toList(growable: false);
+    final List<String> models = normalizeModelIds(
+      data.whereType<Map>().map((Map model) => model['id']).whereType<String>(),
+    );
     AppLogger.info(
       'model_list.fetch.completed',
       fields: <String, Object?>{

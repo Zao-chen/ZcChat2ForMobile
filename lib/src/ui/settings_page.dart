@@ -1083,9 +1083,9 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final List<String> models = _appConfig
-        .providerConfig(widget.provider)
-        .models;
+    final List<String> models = normalizeModelIds(
+      _appConfig.providerConfig(widget.provider).models,
+    );
 
     return Scaffold(
       appBar: AppBar(title: Text(widget.provider.label)),
@@ -2073,9 +2073,9 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final List<String> modelList = _appConfig
-        .providerConfig(_runtimeConfig.provider)
-        .models;
+    final List<String> modelList = normalizeModelIds(
+      _appConfig.providerConfig(_runtimeConfig.provider).models,
+    );
     final List<String> vitsList = _appConfig.vits.modelAndSpeakers;
     final String? selectedVitsItem =
         vitsList.contains(_runtimeConfig.vitsMasSelect) &&

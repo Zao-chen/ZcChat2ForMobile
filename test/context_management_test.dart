@@ -5,6 +5,20 @@ import 'package:zcchat2_for_mobile/src/services/context_token_estimator.dart';
 import 'package:zcchat2_for_mobile/src/services/model_context_catalog.dart';
 
 void main() {
+  test('ModelProviderConfig normalizes duplicate model ids', () {
+    final ModelProviderConfig fromJson = ModelProviderConfig.fromJson(
+      <String, dynamic>{
+        'ModelList': <String>['gpt-5.1', ' gpt-5.1 ', '', 'gpt-5.2'],
+      },
+    );
+    expect(fromJson.models, <String>['gpt-5.1', 'gpt-5.2']);
+
+    final ModelProviderConfig copied = fromJson.copyWith(
+      models: <String>['gpt-5.1', 'gpt-5.1', ' gpt-5.2 '],
+    );
+    expect(copied.models, <String>['gpt-5.1', 'gpt-5.2']);
+  });
+
   group('ContextTokenEstimator', () {
     test('estimates text and request overhead', () {
       expect(ContextTokenEstimator.estimateTextTokens(''), 0);
