@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -76,7 +76,9 @@ void main() {
 
       final AppStoragePaths paths = AppStoragePaths(tempDir);
 
-      final CharacterRepository characterRepository = CharacterRepository(paths);
+      final CharacterRepository characterRepository = CharacterRepository(
+        paths,
+      );
       final SettingsRepository settingsRepository = SettingsRepository(paths);
       final ConversationRepository conversationRepository =
           ConversationRepository(paths, characterRepository);
@@ -133,7 +135,7 @@ void main() {
       await tester.tap(find.byType(TextField));
       await tester.pumpAndSettle();
 
-      expect(find.byIcon(Icons.keyboard_return_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.arrow_upward_rounded), findsOneWidget);
       controller.dispose();
     },
   );
