@@ -134,6 +134,13 @@ void main() {
       expect(find.text('你'), findsOneWidget);
       expect(find.text('按住说话'), findsOneWidget);
       expect(find.text('识别后自动发送'), findsOneWidget);
+      expect(find.textContaining('剩余'), findsNothing);
+
+      await tester.tap(find.byType(LinearProgressIndicator));
+      await tester.pumpAndSettle();
+      expect(find.text('上下文详情'), findsOneWidget);
+      await tester.tap(find.byType(ModalBarrier).last);
+      await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField), '你好');
       await tester.runAsync(() async {

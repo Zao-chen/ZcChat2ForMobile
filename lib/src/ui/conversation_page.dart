@@ -411,7 +411,7 @@ class _DialogPanel extends StatelessWidget {
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 6, 6),
+              padding: const EdgeInsets.fromLTRB(16, 14, 12, 12),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -431,7 +431,7 @@ class _DialogPanel extends StatelessWidget {
                         ),
                       ),
                       SizedBox(
-                        width: 210,
+                        width: 160,
                         child: _ContextTokenProgress(
                           tokenLimit: contextTokenLimit,
                           estimatedTokens: estimatedContextTokens,
@@ -616,39 +616,21 @@ class _ContextTokenProgress extends StatelessWidget {
         : nearlyExhausted
         ? colors.tertiary
         : colors.onSurfaceVariant;
-    final String label = tokenLimit <= 0
-        ? 'Token --'
-        : '剩余 ${_compactTokenCount(remaining)}';
-
-    return Tooltip(
-      message: description,
-      triggerMode: TooltipTriggerMode.tap,
-      child: Semantics(
-        label: description,
-        child: Align(
-          alignment: Alignment.centerRight,
-          child: SizedBox(
-            height: 24,
-            child: Row(
-              children: <Widget>[
-                Expanded(
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 5,
-                    color: progressColor,
-                    backgroundColor: colors.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  isCompacting ? '整理中…' : label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colors.onSurfaceVariant,
-                  ),
-                ),
-              ],
+    return Semantics(
+      button: true,
+      label: '查看上下文详情：$description',
+      child: InkWell(
+        onTap: () => _showDetails(context),
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(
+          height: 32,
+          child: Center(
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 5,
+              color: progressColor,
+              backgroundColor: colors.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(3),
             ),
           ),
         ),
@@ -656,14 +638,51 @@ class _ContextTokenProgress extends StatelessWidget {
     );
   }
 
-  static String _compactTokenCount(int tokens) {
-    if (tokens >= 1000000) {
-      return '${(tokens / 1000000).toStringAsFixed(tokens >= 10000000 ? 0 : 1)}M';
-    }
-    if (tokens >= 1000) {
-      return '${(tokens / 1000).toStringAsFixed(tokens >= 100000 ? 0 : 1)}K';
-    }
-    return tokens.toString();
+  void _showDetails(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Icon(
+                    Icons.memory_rounded,
+                    size: 20,
+                    color: colors.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '上下文详情',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                      color: colors.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                description,
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 1.55,
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
