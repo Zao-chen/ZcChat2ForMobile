@@ -26,6 +26,13 @@ void main() {
     expect(paths.characterAssetConfigFile('test').existsSync(), isTrue);
     expect(paths.characterRuntimeConfigFile('test').existsSync(), isTrue);
     expect(paths.characterContextFile('test').existsSync(), isTrue);
+    final Map<String, dynamic> assetConfig =
+        jsonDecode(await paths.characterAssetConfigFile('test').readAsString())
+            as Map<String, dynamic>;
+    expect(
+      (assetConfig['speechInput'] as Map<String, dynamic>)['wakeWords'],
+      <String>['test'],
+    );
     expect(
       File(
         '${paths.characterTachieDirectory('test').path}${Platform.pathSeparator}default.png',

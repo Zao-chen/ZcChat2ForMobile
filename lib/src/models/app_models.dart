@@ -1,4 +1,4 @@
-﻿class ModelProviderConfig {
+class ModelProviderConfig {
   const ModelProviderConfig({
     this.apiKey = '',
     this.baseUrl = '',
@@ -99,24 +99,28 @@ class VitsConfig {
 class SpeechInputConfig {
   const SpeechInputConfig({
     this.enable = false,
+    this.wakeEnabled = false,
     this.autoSend = false,
     this.baiduApiKey = '',
     this.baiduSecretKey = '',
   });
 
   final bool enable;
+  final bool wakeEnabled;
   final bool autoSend;
   final String baiduApiKey;
   final String baiduSecretKey;
 
   SpeechInputConfig copyWith({
     bool? enable,
+    bool? wakeEnabled,
     bool? autoSend,
     String? baiduApiKey,
     String? baiduSecretKey,
   }) {
     return SpeechInputConfig(
       enable: enable ?? this.enable,
+      wakeEnabled: wakeEnabled ?? this.wakeEnabled,
       autoSend: autoSend ?? this.autoSend,
       baiduApiKey: baiduApiKey ?? this.baiduApiKey,
       baiduSecretKey: baiduSecretKey ?? this.baiduSecretKey,
@@ -127,9 +131,13 @@ class SpeechInputConfig {
     final Map<String, dynamic> baiduMap =
         (json['Baidu'] as Map?)?.cast<String, dynamic>() ??
         const <String, dynamic>{};
+    final Map<String, dynamic> wakeMap =
+        (json['Wake'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
 
     return SpeechInputConfig(
       enable: _parseBool(json['Enable']),
+      wakeEnabled: _parseBool(wakeMap['Enable']),
       autoSend: _parseBool(json['AutoSend']),
       baiduApiKey: (baiduMap['ApiKey'] as String?)?.trim() ?? '',
       baiduSecretKey: (baiduMap['SecretKey'] as String?)?.trim() ?? '',
@@ -139,6 +147,7 @@ class SpeechInputConfig {
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'Enable': enable,
+      'Wake': <String, dynamic>{'Enable': wakeEnabled},
       'AutoSend': autoSend,
       'Baidu': <String, dynamic>{
         'ApiKey': baiduApiKey,
@@ -274,11 +283,16 @@ class AppConfig {
         provider: config,
       },
       vits: vits,
+      speechInput: speechInput,
     );
   }
 
   AppConfig copyWithVits(VitsConfig config) {
-    return AppConfig(providers: providers, vits: config);
+    return AppConfig(
+      providers: providers,
+      vits: config,
+      speechInput: speechInput,
+    );
   }
 
   AppConfig copyWithSpeechInput(SpeechInputConfig config) {
@@ -299,21 +313,82 @@ class AppConfig {
   }
 }
 
-class CharacterAssetConfig {
-  const CharacterAssetConfig({this.prompt = ''});
+class CharacterSpeechConfig {
+  const CharacterSpeechConfig({
+    this.wakeWords = const <String>[],
+    this.endWords = const <String>[],
+  });
 
-  final String prompt;
+  final List<String> wakeWords;
+  final List<String> endWords;
 
-  CharacterAssetConfig copyWith({String? prompt}) {
-    return CharacterAssetConfig(prompt: prompt ?? this.prompt);
+  CharacterSpeechConfig copyWith({
+    List<String>? wakeWords,
+    List<String>? endWords,
+  }) {
+    return CharacterSpeechConfig(
+      wakeWords: wakeWords ?? List<String>.from(this.wakeWords),
+      endWords: endWords ?? List<String>.from(this.endWords),
+    );
   }
 
-  factory CharacterAssetConfig.fromJson(Map<String, dynamic> json) {
-    return CharacterAssetConfig(prompt: (json['prompt'] as String?) ?? '');
+  factory CharacterSpeechConfig.fromJson(Map<String, dynamic> json) {
+    List<String> readWords(String key) {
+      final Object? value = json[key];
+      return value is List
+          ? value
+                .whereType<String>()
+                .map((String word) => word.trim())
+                .where((String word) => word.isNotEmpty)
+                .toList(growable: false)
+          : const <String>[];
+    }
+
+    return CharacterSpeechConfig(
+      wakeWords: readWords('wakeWords'),
+      endWords: readWords('endWords'),
+    );
   }
 
   Map<String, dynamic> toJson() {
-    return <String, dynamic>{'prompt': prompt};
+    return <String, dynamic>{'wakeWords': wakeWords, 'endWords': endWords};
+  }
+}
+
+class CharacterAssetConfig {
+  const CharacterAssetConfig({
+    this.prompt = '',
+    this.speechInput = const CharacterSpeechConfig(),
+  });
+
+  final String prompt;
+  final CharacterSpeechConfig speechInput;
+
+  CharacterAssetConfig copyWith({
+    String? prompt,
+    CharacterSpeechConfig? speechInput,
+  }) {
+    return CharacterAssetConfig(
+      prompt: prompt ?? this.prompt,
+      speechInput: speechInput ?? this.speechInput,
+    );
+  }
+
+  factory CharacterAssetConfig.fromJson(Map<String, dynamic> json) {
+    final Map<String, dynamic> speechMap =
+        (json['speechInput'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    return CharacterAssetConfig(
+      prompt: (json['prompt'] as String?) ?? '',
+      speechInput: CharacterSpeechConfig.fromJson(speechMap),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'prompt': prompt,
+      'speechInput': speechInput.toJson(),
+    };
   }
 }
 

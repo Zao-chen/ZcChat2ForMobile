@@ -40,7 +40,9 @@ class _ConversationPageState extends State<ConversationPage> {
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerChanged);
-    widget.controller.initialize();
+    if (widget.controller.isLoading) {
+      unawaited(widget.controller.initialize());
+    }
   }
 
   @override
@@ -295,11 +297,16 @@ class _ConversationPageState extends State<ConversationPage> {
                         characterName: controller.selectedCharacter,
                         inputController: _inputController,
                         isSending: controller.isSending,
+                        showContinueButton: controller.showContinueButton,
                         isRecording: controller.isRecording,
                         isRecognizing: controller.isRecognizing,
+                        speechState: controller.speechState,
                         speechEnabled: controller.appConfig.speechInput.enable,
+                        wakeEnabled:
+                            controller.appConfig.speechInput.wakeEnabled,
                         autoSend: controller.appConfig.speechInput.autoSend,
                         onSubmitted: _submitInput,
+                        onContinue: controller.continueConversation,
                         onHistory: _showHistorySheet,
                         onAutoSendChanged: (bool? value) {
                           final SpeechInputConfig old =
@@ -330,11 +337,15 @@ class _DialogPanel extends StatelessWidget {
     required this.characterName,
     required this.inputController,
     required this.isSending,
+    required this.showContinueButton,
     required this.isRecording,
     required this.isRecognizing,
+    required this.speechState,
     required this.speechEnabled,
+    required this.wakeEnabled,
     required this.autoSend,
     required this.onSubmitted,
+    required this.onContinue,
     required this.onHistory,
     required this.onAutoSendChanged,
     required this.onRecordStart,
@@ -344,11 +355,15 @@ class _DialogPanel extends StatelessWidget {
   final String characterName;
   final TextEditingController inputController;
   final bool isSending;
+  final bool showContinueButton;
   final bool isRecording;
   final bool isRecognizing;
+  final SpeechInteractionState speechState;
   final bool speechEnabled;
+  final bool wakeEnabled;
   final bool autoSend;
   final Future<void> Function() onSubmitted;
+  final VoidCallback onContinue;
   final VoidCallback onHistory;
   final ValueChanged<bool?> onAutoSendChanged;
   final AsyncCallback onRecordStart;
@@ -384,7 +399,12 @@ class _DialogPanel extends StatelessWidget {
               minLines: 4,
               maxLines: 6,
               textInputAction: TextInputAction.send,
-              onSubmitted: (_) => onSubmitted(),
+              onTap: showContinueButton ? onContinue : null,
+              onSubmitted: (_) {
+                if (!showContinueButton) {
+                  onSubmitted();
+                }
+              },
               decoration: InputDecoration(
                 hintText: isSending ? '' : '说点什么吧',
                 hintStyle: const TextStyle(color: Color(0x80666666)),
@@ -393,6 +413,13 @@ class _DialogPanel extends StatelessWidget {
                 focusedBorder: InputBorder.none,
                 isCollapsed: true,
                 contentPadding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
+                suffixIcon: Icon(
+                  showContinueButton
+                      ? Icons.touch_app_rounded
+                      : Icons.keyboard_return_rounded,
+                  size: 18,
+                  color: const Color(0x80666666),
+                ),
               ),
               style: const TextStyle(
                 fontSize: 15,
@@ -407,6 +434,14 @@ class _DialogPanel extends StatelessWidget {
                     onRecordStart: onRecordStart,
                     onRecordStop: onRecordStop,
                     isRecording: isRecording,
+                    enabled:
+                        isRecording ||
+                        (speechState != SpeechInteractionState.recognizing &&
+                            speechState !=
+                                SpeechInteractionState.waitingForReply &&
+                            speechState != SpeechInteractionState.ending &&
+                            speechState != SpeechInteractionState.capturing),
+                    tooltip: wakeEnabled ? '长按录音；松开后恢复语音唤醒' : '长按录音',
                   ),
                   const SizedBox(width: 2),
                   SizedBox(
@@ -438,10 +473,16 @@ class _DialogPanel extends StatelessWidget {
                       ],
                     ),
                   ),
-                  if (isRecording || isRecognizing) ...<Widget>[
+                  if (isRecording ||
+                      isRecognizing ||
+                      speechState !=
+                          SpeechInteractionState.disabled) ...<Widget>[
                     const SizedBox(width: 8),
                     Text(
-                      isRecognizing ? '识别中...' : '录音中...',
+                      _speechStateLabel(
+                        speechState,
+                        isManualRecording: isRecording,
+                      ),
                       style: const TextStyle(
                         fontSize: 12,
                         color: Color(0xFF888888),
@@ -919,11 +960,15 @@ class _MicRecordButton extends StatefulWidget {
     required this.onRecordStart,
     required this.onRecordStop,
     required this.isRecording,
+    required this.enabled,
+    required this.tooltip,
   });
 
   final AsyncCallback onRecordStart;
   final AsyncCallback onRecordStop;
   final bool isRecording;
+  final bool enabled;
+  final String tooltip;
 
   @override
   State<_MicRecordButton> createState() => _MicRecordButtonState();
@@ -944,10 +989,16 @@ class _MicRecordButtonState extends State<_MicRecordButton> {
         : Colors.transparent;
 
     return Tooltip(
-      message: '长按录音',
+      message: widget.tooltip,
       child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hovered = true),
+        cursor: widget.enabled
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.forbidden,
+        onEnter: (_) {
+          if (widget.enabled) {
+            setState(() => _hovered = true);
+          }
+        },
         onExit: (_) {
           if (_hovered || _pressed) {
             setState(() {
@@ -958,10 +1009,16 @@ class _MicRecordButtonState extends State<_MicRecordButton> {
         },
         child: Listener(
           onPointerDown: (_) {
+            if (!widget.enabled) {
+              return;
+            }
             setState(() => _pressed = true);
             unawaited(widget.onRecordStart());
           },
           onPointerUp: (_) {
+            if (!_pressed) {
+              return;
+            }
             setState(() => _pressed = false);
             unawaited(widget.onRecordStop());
           },
@@ -979,12 +1036,33 @@ class _MicRecordButtonState extends State<_MicRecordButton> {
               'assets/microphone-solid.svg',
               width: 18,
               height: 18,
+              colorFilter: widget.enabled
+                  ? null
+                  : const ColorFilter.mode(Color(0xFFBBBBBB), BlendMode.srcIn),
             ),
           ),
         ),
       ),
     );
   }
+}
+
+String _speechStateLabel(
+  SpeechInteractionState state, {
+  required bool isManualRecording,
+}) {
+  if (isManualRecording) {
+    return '录音中...';
+  }
+  return switch (state) {
+    SpeechInteractionState.disabled => '',
+    SpeechInteractionState.waitingForWake => '等待唤醒',
+    SpeechInteractionState.capturing => '聆听中...',
+    SpeechInteractionState.recognizing => '识别中...',
+    SpeechInteractionState.waitingForReply => '回复中...',
+    SpeechInteractionState.continuousReady => '连续对话中',
+    SpeechInteractionState.ending => '结束对话中...',
+  };
 }
 
 class _QtStyleButton extends StatefulWidget {

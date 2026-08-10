@@ -252,6 +252,19 @@ class CharacterRepository {
     );
   }
 
+  Future<void> saveCharacterSpeechConfig(
+    String characterName,
+    CharacterSpeechConfig speechInput,
+  ) async {
+    final CharacterAssetConfig current = await loadCharacterAssetConfig(
+      characterName,
+    );
+    await _writeJsonObject(
+      paths.characterAssetConfigFile(characterName),
+      current.copyWith(speechInput: speechInput).toJson(),
+    );
+  }
+
   Future<void> saveTachieSize(String characterName, int size) async {
     final CharacterRuntimeConfig current = await loadCharacterRuntimeConfig(
       characterName,
@@ -932,6 +945,15 @@ class WebPreviewCharacterRepository extends CharacterRepository {
   @override
   Future<void> saveCharacterPrompt(String characterName, String prompt) async {
     _assetConfig = _assetConfig.copyWith(prompt: prompt);
+    _saveAssetConfig();
+  }
+
+  @override
+  Future<void> saveCharacterSpeechConfig(
+    String characterName,
+    CharacterSpeechConfig speechInput,
+  ) async {
+    _assetConfig = _assetConfig.copyWith(speechInput: speechInput);
     _saveAssetConfig();
   }
 

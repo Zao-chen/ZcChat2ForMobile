@@ -4,8 +4,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import '../models/app_models.dart';
@@ -14,7 +12,19 @@ import '../repositories/app_repositories.dart';
 import '../services/baidu_speech_service.dart';
 import '../services/llm_service.dart';
 import '../services/openai_compatible_llm_service.dart';
+import '../services/pcm_voice_segmenter.dart';
+import '../services/speech_session_policy.dart';
 import '../services/vits_service.dart';
+
+enum SpeechInteractionState {
+  disabled,
+  waitingForWake,
+  capturing,
+  recognizing,
+  waitingForReply,
+  continuousReady,
+  ending,
+}
 
 class ConversationController extends ChangeNotifier {
   ConversationController({
@@ -36,6 +46,8 @@ class ConversationController extends ChangeNotifier {
   bool showContinueButton = false;
   bool isRecording = false;
   bool isRecognizing = false;
+  bool isSpeechSessionActive = false;
+  SpeechInteractionState speechState = SpeechInteractionState.disabled;
   String pendingInputText = '';
   String selectedCharacter = 'test';
   CharacterAssetConfig characterAssetConfig = const CharacterAssetConfig();
@@ -49,14 +61,19 @@ class ConversationController extends ChangeNotifier {
   String _rawReply = '';
   int _streamSynthCursor = 0;
 
-  final AudioRecorder _audioRecorder = AudioRecorder();
-  final BaiduSpeechService _speechService = const BaiduSpeechService();
+  AudioRecorder? _audioRecorder;
+  final BaiduSpeechService _speechService = BaiduSpeechService();
+  final SpeechSessionPolicy _speechSessionPolicy = SpeechSessionPolicy();
+  final PcmVoiceSegmenter _voiceSegmenter = PcmVoiceSegmenter();
   bool _isStartingRecording = false;
   bool _isStoppingRecording = false;
   bool _stopRequestedDuringStart = false;
-  String? _recordingFilePath;
+  bool _captureStreamActive = false;
+  bool _automaticListening = false;
   BytesBuilder? _recordingBytes;
   StreamSubscription<Uint8List>? _recordingStreamSubscription;
+
+  AudioRecorder get _recorder => _audioRecorder ??= AudioRecorder();
 
   Future<void> initialize() async {
     await reload();
@@ -66,6 +83,9 @@ class ConversationController extends ChangeNotifier {
     isLoading = true;
     notifyListeners();
 
+    await _stopCaptureStream();
+    _speechSessionPolicy.reset();
+    isSpeechSessionActive = false;
     await vitsPlayback.stop();
     selectedCharacter = await characterRepository.getSelectedCharacter();
     characterAssetConfig = await characterRepository.loadCharacterAssetConfig(
@@ -84,10 +104,14 @@ class ConversationController extends ChangeNotifier {
     );
 
     isLoading = false;
+    await _resumeAutomaticListening();
     notifyListeners();
   }
 
-  Future<void> sendMessage(String input) async {
+  Future<void> sendMessage(
+    String input, {
+    bool resumeSpeechListening = true,
+  }) async {
     final String userInput = input.trim();
     if (userInput.isEmpty || isSending) {
       return;
@@ -96,7 +120,8 @@ class ConversationController extends ChangeNotifier {
     final ModelProviderConfig providerConfig = appConfig.providerConfig(
       runtimeConfig.provider,
     );
-    final bool configIncomplete = providerConfig.apiKey.isEmpty ||
+    final bool configIncomplete =
+        providerConfig.apiKey.isEmpty ||
         runtimeConfig.modelSelect.isEmpty ||
         (runtimeConfig.provider == LlmProviderType.custom &&
             providerConfig.baseUrl.isEmpty);
@@ -115,6 +140,7 @@ class ConversationController extends ChangeNotifier {
       return;
     }
 
+    await _stopCaptureStream();
     await vitsPlayback.stop();
     if (runtimeConfig.provider == LlmProviderType.custom) {
       final LlmService? customService = services[LlmProviderType.custom];
@@ -186,8 +212,12 @@ class ConversationController extends ChangeNotifier {
       selectedCharacter,
       currentMood,
     );
+    await vitsPlayback.waitUntilIdle();
     isSending = false;
     showContinueButton = true;
+    if (resumeSpeechListening) {
+      await _resumeAutomaticListening();
+    }
     notifyListeners();
   }
 
@@ -203,62 +233,37 @@ class ConversationController extends ChangeNotifier {
         _isStartingRecording ||
         _isStoppingRecording ||
         isSending ||
-        isRecognizing) {
+        isRecognizing ||
+        _voiceSegmenter.isCapturing) {
       return;
     }
 
-    _isStartingRecording = true;
     _stopRequestedDuringStart = false;
     showContinueButton = false;
     currentDisplayText = '';
     pendingInputText = '';
     notifyListeners();
 
-    bool shouldStopAfterStart = false;
-
     try {
-      if (!await _audioRecorder.hasPermission()) {
-        currentDisplayText = '麦克风权限未授权，请在系统设置中开启。';
-        showContinueButton = true;
-        notifyListeners();
+      _recordingBytes = BytesBuilder(copy: false);
+      final bool started = await _ensureCaptureStream();
+      if (!started) {
+        _recordingBytes = null;
         return;
       }
 
-      final Directory tempDir = await getTemporaryDirectory();
-      final String filePath = p.join(
-        tempDir.path,
-        'speech_input_${DateTime.now().millisecondsSinceEpoch}.wav',
-      );
-      _recordingFilePath = filePath;
-
-      final Stream<Uint8List> stream = await _audioRecorder.startStream(
-        const RecordConfig(
-          encoder: AudioEncoder.pcm16bits,
-          sampleRate: _speechSampleRate,
-          numChannels: _speechChannels,
-          streamBufferSize: 2048,
-        ),
-      );
-      final BytesBuilder recordingBytes = BytesBuilder(copy: false);
-      _recordingBytes = recordingBytes;
-      _recordingStreamSubscription = stream.listen(recordingBytes.add);
-
+      _automaticListening = false;
       isRecording = true;
-      shouldStopAfterStart = _stopRequestedDuringStart;
+      speechState = SpeechInteractionState.capturing;
       notifyListeners();
     } catch (error) {
-      await _clearRecordingSession();
+      _recordingBytes = null;
       currentDisplayText = '录音启动失败：$error';
       showContinueButton = true;
       notifyListeners();
-    } finally {
-      _isStartingRecording = false;
-      if (!isRecording) {
-        _stopRequestedDuringStart = false;
-      }
     }
 
-    if (shouldStopAfterStart && isRecording) {
+    if (_stopRequestedDuringStart && isRecording) {
       _stopRequestedDuringStart = false;
       await stopRecording();
     }
@@ -278,22 +283,19 @@ class ConversationController extends ChangeNotifier {
     isRecording = false;
     notifyListeners();
 
-    String? filePath;
-    try {
-      filePath = await _finishStreamRecording();
-    } catch (_) {
-      // 录音停止失败，仍然重置状态
-    } finally {
-      _isStoppingRecording = false;
-      _stopRequestedDuringStart = false;
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    final Uint8List pcmBytes = _recordingBytes?.takeBytes() ?? Uint8List(0);
+    _recordingBytes = null;
+    if (!appConfig.speechInput.wakeEnabled) {
+      await _stopCaptureStream();
     }
+    _isStoppingRecording = false;
+    _stopRequestedDuringStart = false;
 
-    filePath = await _resolveRecordedFilePath(filePath);
-    await _clearRecordingSession();
-
-    if (filePath == null || filePath.isEmpty) {
+    if (pcmBytes.isEmpty) {
       currentDisplayText = '没有录到声音，请长按说话。';
       showContinueButton = true;
+      await _resumeAutomaticListening();
       notifyListeners();
       return;
     }
@@ -303,6 +305,7 @@ class ConversationController extends ChangeNotifier {
         speechConfig.baiduSecretKey.isEmpty) {
       currentDisplayText = '请先在设置页配置百度语音识别 API Key 和 Secret Key。';
       showContinueButton = true;
+      await _resumeAutomaticListening();
       notifyListeners();
       return;
     }
@@ -311,11 +314,10 @@ class ConversationController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final String recognized = await _speechService.recognize(
+      final String recognized = await _speechService.recognizeBytes(
         apiKey: speechConfig.baiduApiKey,
         secretKey: speechConfig.baiduSecretKey,
-        audioFile: File(filePath),
-        format: _speechFormatForPath(filePath),
+        audioBytes: pcmBytes,
       );
 
       if (recognized.isEmpty) {
@@ -335,93 +337,203 @@ class ConversationController extends ChangeNotifier {
     }
 
     isRecognizing = false;
+    await _resumeAutomaticListening();
     notifyListeners();
   }
 
-  Future<String?> _finishStreamRecording() async {
-    await Future<void>.delayed(const Duration(milliseconds: 80));
-    await _audioRecorder.stop();
-    await Future<void>.delayed(const Duration(milliseconds: 20));
-    await _recordingStreamSubscription?.cancel();
-    _recordingStreamSubscription = null;
-
-    final String? filePath = _recordingFilePath;
-    final Uint8List pcmBytes = _recordingBytes?.takeBytes() ?? Uint8List(0);
-    _recordingBytes = null;
-
-    if (filePath == null || filePath.isEmpty || pcmBytes.isEmpty) {
-      return null;
+  Future<bool> _ensureCaptureStream() async {
+    if (_captureStreamActive) {
+      return true;
+    }
+    if (_isStartingRecording) {
+      return false;
     }
 
-    final File outputFile = File(filePath);
-    await outputFile.parent.create(recursive: true);
-    await outputFile.writeAsBytes(_buildWavBytes(pcmBytes), flush: true);
-    return filePath;
-  }
-
-  Future<String?> _resolveRecordedFilePath(String? stoppedPath) async {
-    final String? candidate = stoppedPath != null && stoppedPath.isNotEmpty
-        ? stoppedPath
-        : _recordingFilePath;
-    if (candidate == null || candidate.isEmpty) {
-      return null;
-    }
-
+    _isStartingRecording = true;
     try {
-      final File file = File(candidate);
-      if (!await file.exists() || await file.length() == 0) {
-        return null;
+      if (!await _recorder.hasPermission()) {
+        currentDisplayText = '麦克风权限未授权，请在系统设置中开启。';
+        showContinueButton = true;
+        speechState = SpeechInteractionState.disabled;
+        notifyListeners();
+        return false;
       }
-      return candidate;
-    } catch (_) {
-      return null;
+
+      final Stream<Uint8List> stream = await _recorder.startStream(
+        const RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: _speechSampleRate,
+          numChannels: _speechChannels,
+          streamBufferSize: 2048,
+        ),
+      );
+      _recordingStreamSubscription = stream.listen(
+        _handleAudioChunk,
+        onError: _handleAudioStreamError,
+      );
+      _captureStreamActive = true;
+      return true;
+    } catch (error) {
+      currentDisplayText = '录音启动失败：$error';
+      showContinueButton = true;
+      speechState = SpeechInteractionState.disabled;
+      notifyListeners();
+      return false;
+    } finally {
+      _isStartingRecording = false;
     }
   }
 
-  Future<void> _clearRecordingSession() async {
+  Future<void> _stopCaptureStream() async {
+    final bool shouldStopRecorder =
+        _captureStreamActive || _recordingStreamSubscription != null;
+    _automaticListening = false;
+    _captureStreamActive = false;
     await _recordingStreamSubscription?.cancel();
     _recordingStreamSubscription = null;
-    _recordingBytes = null;
-    _recordingFilePath = null;
-  }
-
-  String _speechFormatForPath(String filePath) {
-    return p.extension(filePath).toLowerCase() == '.wav' ? 'wav' : 'm4a';
-  }
-
-  Uint8List _buildWavBytes(Uint8List pcmBytes) {
-    final Uint8List wavBytes = Uint8List(44 + pcmBytes.length);
-    final ByteData header = ByteData.sublistView(wavBytes);
-
-    void writeAscii(int offset, String value) {
-      for (int i = 0; i < value.length; i += 1) {
-        wavBytes[offset + i] = value.codeUnitAt(i);
+    if (shouldStopRecorder) {
+      try {
+        await _recorder.stop();
+      } catch (_) {
+        // 设备已停止时无需再次处理。
       }
     }
+    _voiceSegmenter.reset();
+  }
 
-    writeAscii(0, 'RIFF');
-    header.setUint32(4, 36 + pcmBytes.length, Endian.little);
-    writeAscii(8, 'WAVE');
-    writeAscii(12, 'fmt ');
-    header.setUint32(16, 16, Endian.little);
-    header.setUint16(20, 1, Endian.little);
-    header.setUint16(22, _speechChannels, Endian.little);
-    header.setUint32(24, _speechSampleRate, Endian.little);
-    header.setUint32(
-      28,
-      _speechSampleRate * _speechChannels * _speechBytesPerSample,
-      Endian.little,
-    );
-    header.setUint16(
-      32,
-      _speechChannels * _speechBytesPerSample,
-      Endian.little,
-    );
-    header.setUint16(34, _speechBitsPerSample, Endian.little);
-    writeAscii(36, 'data');
-    header.setUint32(40, pcmBytes.length, Endian.little);
-    wavBytes.setRange(44, wavBytes.length, pcmBytes);
-    return wavBytes;
+  Future<void> _resumeAutomaticListening() async {
+    final SpeechInputConfig config = appConfig.speechInput;
+    if (!config.enable || !config.wakeEnabled) {
+      _automaticListening = false;
+      speechState = SpeechInteractionState.disabled;
+      return;
+    }
+    if (isSending || isRecognizing || isRecording || isLoading) {
+      return;
+    }
+
+    final bool started = await _ensureCaptureStream();
+    if (!started) {
+      return;
+    }
+    _automaticListening = true;
+    _setReadySpeechState();
+  }
+
+  void _handleAudioChunk(Uint8List pcm) {
+    if (isRecording || _isStoppingRecording) {
+      final BytesBuilder? bytes = _recordingBytes;
+      if (bytes == null) {
+        return;
+      }
+      final int remaining = _maximumSpeechBytes - bytes.length;
+      if (remaining > 0) {
+        bytes.add(pcm.length <= remaining ? pcm : pcm.sublist(0, remaining));
+      }
+      if (bytes.length >= _maximumSpeechBytes) {
+        unawaited(stopRecording());
+      }
+      return;
+    }
+
+    if (!_automaticListening || isSending || isRecognizing) {
+      return;
+    }
+    final PcmVoiceSegmentResult result = _voiceSegmenter.process(pcm);
+    if (result.event == PcmVoiceSegmentEvent.started) {
+      speechState = SpeechInteractionState.capturing;
+      notifyListeners();
+    } else if (result.event == PcmVoiceSegmentEvent.discarded) {
+      _setReadySpeechState();
+      notifyListeners();
+    } else if (result.event == PcmVoiceSegmentEvent.completed &&
+        result.pcm != null) {
+      unawaited(_recognizeAutomaticSegment(result.pcm!));
+    }
+  }
+
+  void _handleAudioStreamError(Object error, StackTrace stackTrace) {
+    _captureStreamActive = false;
+    _automaticListening = false;
+    speechState = SpeechInteractionState.disabled;
+    currentDisplayText = '麦克风采集失败：$error';
+    showContinueButton = true;
+    notifyListeners();
+  }
+
+  Future<void> _recognizeAutomaticSegment(Uint8List pcm) async {
+    if (isRecognizing || isSending) {
+      return;
+    }
+    _automaticListening = false;
+    isRecognizing = true;
+    speechState = SpeechInteractionState.recognizing;
+    notifyListeners();
+
+    final SpeechInputConfig config = appConfig.speechInput;
+    try {
+      if (config.baiduApiKey.isEmpty || config.baiduSecretKey.isEmpty) {
+        throw const SpeechRecognitionException(
+          '请先配置百度语音识别 API Key 和 Secret Key',
+        );
+      }
+      final String recognized = await _speechService.recognizeBytes(
+        apiKey: config.baiduApiKey,
+        secretKey: config.baiduSecretKey,
+        audioBytes: pcm,
+      );
+      if (recognized.isEmpty) {
+        return;
+      }
+
+      final SpeechRecognitionDecision decision = _speechSessionPolicy
+          .consumeAutomaticRecognition(
+            text: recognized,
+            wakeWords: _wakeWords,
+            endWords: _endWords,
+          );
+      if (decision == SpeechRecognitionDecision.ignore) {
+        return;
+      }
+
+      isSpeechSessionActive = _speechSessionPolicy.isSessionActive;
+      isRecognizing = false;
+      speechState = decision == SpeechRecognitionDecision.submitAndEnd
+          ? SpeechInteractionState.ending
+          : SpeechInteractionState.waitingForReply;
+      notifyListeners();
+
+      await sendMessage(recognized, resumeSpeechListening: false);
+      if (_speechSessionPolicy.completeOutput()) {
+        isSpeechSessionActive = false;
+      }
+    } on SpeechRecognitionException catch (error) {
+      currentDisplayText = '语音识别失败：${error.message}';
+      showContinueButton = true;
+    } catch (error) {
+      currentDisplayText = '语音识别失败：$error';
+      showContinueButton = true;
+    } finally {
+      isRecognizing = false;
+      await _resumeAutomaticListening();
+      notifyListeners();
+    }
+  }
+
+  List<String> get _wakeWords {
+    final List<String> configured = characterAssetConfig.speechInput.wakeWords;
+    return configured.isEmpty ? <String>[selectedCharacter] : configured;
+  }
+
+  List<String> get _endWords {
+    final List<String> configured = characterAssetConfig.speechInput.endWords;
+    return configured.isEmpty ? const <String>['结束对话'] : configured;
+  }
+
+  void _setReadySpeechState() {
+    speechState = _speechSessionPolicy.isSessionActive
+        ? SpeechInteractionState.continuousReady
+        : SpeechInteractionState.waitingForWake;
   }
 
   Future<void> editHistoryEntry(int index, String newText) async {
@@ -644,7 +756,11 @@ class ConversationController extends ChangeNotifier {
   @override
   void dispose() {
     unawaited(vitsPlayback.stop());
-    unawaited(_audioRecorder.dispose());
+    unawaited(_recordingStreamSubscription?.cancel() ?? Future<void>.value());
+    final AudioRecorder? recorder = _audioRecorder;
+    if (recorder != null) {
+      unawaited(recorder.dispose());
+    }
     super.dispose();
   }
 }
@@ -652,5 +768,4 @@ class ConversationController extends ChangeNotifier {
 const Set<String> _sentenceEndMarks = <String>{'。', '！', '？', '!', '?', '\n'};
 const int _speechSampleRate = 16000;
 const int _speechChannels = 1;
-const int _speechBitsPerSample = 16;
-const int _speechBytesPerSample = _speechBitsPerSample ~/ 8;
+const int _maximumSpeechBytes = _speechSampleRate * 2 * 20;

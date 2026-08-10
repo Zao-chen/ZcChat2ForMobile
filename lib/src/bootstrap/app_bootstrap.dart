@@ -70,6 +70,10 @@ class AppBootstrap {
             const JsonEncoder.withIndent('  ').convert(
               const CharacterAssetConfig(
                 prompt: '你是一名温柔、自然的二次元角色，请用轻松的语气与用户对话。',
+                speechInput: CharacterSpeechConfig(
+                  wakeWords: <String>['test'],
+                  endWords: <String>['结束对话'],
+                ),
               ).toJson(),
             ),
           );

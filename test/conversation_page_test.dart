@@ -1,4 +1,5 @@
-﻿import 'dart:io';
+﻿import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -52,6 +53,9 @@ class FakeVitsPlayback implements VitsPlayback {
   Future<void> stop() async {}
 
   @override
+  Future<void> waitUntilIdle() async {}
+
+  @override
   void dispose() {}
 }
 
@@ -61,32 +65,21 @@ void main() {
   testWidgets(
     'conversation page sends text and continues by tapping input box',
     (WidgetTester tester) async {
-      final Directory tempDir = await Directory.systemTemp.createTemp(
+      final Directory tempDir = Directory.systemTemp.createTempSync(
         'zcchat2_page_test_',
       );
-      addTearDown(() => tempDir.delete(recursive: true));
+      addTearDown(() {
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
 
       final AppStoragePaths paths = AppStoragePaths(tempDir);
-      await AppBootstrap.ensureInitialized(storagePaths: paths);
 
       final CharacterRepository characterRepository = CharacterRepository(paths);
       final SettingsRepository settingsRepository = SettingsRepository(paths);
       final ConversationRepository conversationRepository =
           ConversationRepository(paths, characterRepository);
-
-      await settingsRepository.saveProviderApiKey(
-        LlmProviderType.deepSeek,
-        'fake-key',
-      );
-      await settingsRepository.saveProviderModels(
-        LlmProviderType.deepSeek,
-        const <String>['fake-model'],
-      );
-      await characterRepository.saveCharacterProvider(
-        'test',
-        LlmProviderType.deepSeek,
-      );
-      await characterRepository.saveCharacterModel('test', 'fake-model');
 
       final ConversationController controller = ConversationController(
         characterRepository: characterRepository,
@@ -98,7 +91,23 @@ void main() {
         },
         vitsPlayback: FakeVitsPlayback(),
       );
-      await controller.initialize();
+      await tester.runAsync(() async {
+        await AppBootstrap.ensureInitialized(storagePaths: paths);
+        await settingsRepository.saveProviderApiKey(
+          LlmProviderType.deepSeek,
+          'fake-key',
+        );
+        await settingsRepository.saveProviderModels(
+          LlmProviderType.deepSeek,
+          const <String>['fake-model'],
+        );
+        await characterRepository.saveCharacterProvider(
+          'test',
+          LlmProviderType.deepSeek,
+        );
+        await characterRepository.saveCharacterModel('test', 'fake-model');
+        await controller.initialize();
+      });
 
       await tester.pumpWidget(
         MaterialApp(
@@ -111,7 +120,10 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField), '你好');
-      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.runAsync(() async {
+        await tester.testTextInput.receiveAction(TextInputAction.send);
+        await _waitUntil(() => controller.history.entries.isNotEmpty);
+      });
       await tester.pump();
       await tester.pumpAndSettle();
 
@@ -122,6 +134,17 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byIcon(Icons.keyboard_return_rounded), findsOneWidget);
+      controller.dispose();
     },
   );
+}
+
+Future<void> _waitUntil(bool Function() predicate) async {
+  final DateTime deadline = DateTime.now().add(const Duration(seconds: 5));
+  while (!predicate()) {
+    if (DateTime.now().isAfter(deadline)) {
+      throw TimeoutException('等待页面异步状态超时');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
 }

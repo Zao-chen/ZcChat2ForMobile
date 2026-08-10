@@ -132,5 +132,8 @@ class NoopVitsPlayback implements VitsPlayback {
   Future<void> stop() async {}
 
   @override
+  Future<void> waitUntilIdle() async {}
+
+  @override
   void dispose() {}
 }

@@ -886,8 +886,8 @@ class LlmSettingsHomePage extends StatelessWidget {
               icon: provider == LlmProviderType.openAI
                   ? Icons.auto_awesome_outlined
                   : provider == LlmProviderType.custom
-                      ? Icons.dns_rounded
-                      : Icons.memory_rounded,
+                  ? Icons.dns_rounded
+                  : Icons.memory_rounded,
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute<void>(
@@ -1413,8 +1413,9 @@ class _SpeechInputSettingsPageState extends State<SpeechInputSettingsPage> {
         _appConfig.speechInput.copyWith(enable: value),
       );
     });
-    await widget.settingsRepository
-        .saveSpeechInputConfig(_appConfig.speechInput);
+    await widget.settingsRepository.saveSpeechInputConfig(
+      _appConfig.speechInput,
+    );
   }
 
   Future<void> _toggleAutoSend(bool value) async {
@@ -1423,8 +1424,20 @@ class _SpeechInputSettingsPageState extends State<SpeechInputSettingsPage> {
         _appConfig.speechInput.copyWith(autoSend: value),
       );
     });
-    await widget.settingsRepository
-        .saveSpeechInputConfig(_appConfig.speechInput);
+    await widget.settingsRepository.saveSpeechInputConfig(
+      _appConfig.speechInput,
+    );
+  }
+
+  Future<void> _toggleWakeEnabled(bool value) async {
+    setState(() {
+      _appConfig = _appConfig.copyWithSpeechInput(
+        _appConfig.speechInput.copyWith(wakeEnabled: value),
+      );
+    });
+    await widget.settingsRepository.saveSpeechInputConfig(
+      _appConfig.speechInput,
+    );
   }
 
   @override
@@ -1479,9 +1492,16 @@ class _SpeechInputSettingsPageState extends State<SpeechInputSettingsPage> {
                 SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
                   value: speechConfig.enable,
-                  title: const Text('启用长按输入按钮'),
-                  subtitle: const Text('在对话面板显示麦克风按钮，长按录音'),
+                  title: const Text('启用语音输入'),
+                  subtitle: const Text('显示麦克风按钮并允许长按录音'),
                   onChanged: _toggleEnable,
+                ),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  value: speechConfig.wakeEnabled,
+                  title: const Text('启用语音唤醒和连续对话'),
+                  subtitle: const Text('持续在本地检测人声，识别结果会用于匹配当前角色的唤醒词'),
+                  onChanged: speechConfig.enable ? _toggleWakeEnabled : null,
                 ),
                 SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
@@ -1515,6 +1535,8 @@ class CharacterSettingsPage extends StatefulWidget {
 
 class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
   final TextEditingController _promptController = TextEditingController();
+  final TextEditingController _wakeWordsController = TextEditingController();
+  final TextEditingController _endWordsController = TextEditingController();
 
   bool _isLoading = true;
   bool _isImporting = false;
@@ -1533,6 +1555,8 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
   @override
   void dispose() {
     _promptController.dispose();
+    _wakeWordsController.dispose();
+    _endWordsController.dispose();
     super.dispose();
   }
 
@@ -1554,6 +1578,16 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
     _runtimeConfig = runtimeConfig;
     _appConfig = appConfig;
     _promptController.text = assetConfig.prompt;
+    _wakeWordsController.text =
+        (assetConfig.speechInput.wakeWords.isEmpty
+                ? <String>[selectedCharacter]
+                : assetConfig.speechInput.wakeWords)
+            .join(' | ');
+    _endWordsController.text =
+        (assetConfig.speechInput.endWords.isEmpty
+                ? const <String>['结束对话']
+                : assetConfig.speechInput.endWords)
+            .join(' | ');
 
     if (mounted) {
       setState(() {
@@ -1617,6 +1651,29 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
     await widget.characterRepository.saveCharacterPrompt(
       _selectedCharacter,
       value,
+    );
+  }
+
+  Future<void> _saveSpeechWords({
+    required String wakeWords,
+    required String endWords,
+  }) async {
+    List<String> parse(String value) {
+      return value
+          .split('|')
+          .map((String word) => word.trim())
+          .where((String word) => word.isNotEmpty)
+          .toList(growable: false);
+    }
+
+    final CharacterSpeechConfig speechInput = CharacterSpeechConfig(
+      wakeWords: parse(wakeWords),
+      endWords: parse(endWords),
+    );
+    _assetConfig = _assetConfig.copyWith(speechInput: speechInput);
+    await widget.characterRepository.saveCharacterSpeechConfig(
+      _selectedCharacter,
+      speechInput,
     );
   }
 
@@ -1778,6 +1835,41 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
                 filled: true,
               ),
               onChanged: _savePrompt,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SettingsSection(
+            title: '语音唤醒',
+            child: Column(
+              children: <Widget>[
+                TextField(
+                  controller: _wakeWordsController,
+                  decoration: const InputDecoration(
+                    labelText: '语音唤醒词',
+                    hintText: '例如：角色名 | 小助手',
+                    helperText: '多个词使用 | 分隔；留空时默认使用角色名',
+                    filled: true,
+                  ),
+                  onChanged: (String value) => _saveSpeechWords(
+                    wakeWords: value,
+                    endWords: _endWordsController.text,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _endWordsController,
+                  decoration: const InputDecoration(
+                    labelText: '连续对话结束词',
+                    hintText: '例如：结束对话 | 再见',
+                    helperText: '结束词所在的整句仍会发送，回复完成后退出连续对话',
+                    filled: true,
+                  ),
+                  onChanged: (String value) => _saveSpeechWords(
+                    wakeWords: _wakeWordsController.text,
+                    endWords: value,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 16),
