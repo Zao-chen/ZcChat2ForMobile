@@ -411,7 +411,7 @@ class _DialogPanel extends StatelessWidget {
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 12, 12),
+              padding: const EdgeInsets.fromLTRB(16, 8, 12, 6),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
