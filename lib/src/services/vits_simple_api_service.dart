@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -11,6 +12,7 @@ class VitsSimpleApiService implements VitsService {
     : _client = client ?? http.Client();
 
   final http.Client _client;
+  static const Duration _requestTimeout = Duration(seconds: 30);
 
   @override
   Future<List<String>> fetchModelAndSpeakers(String apiUrl) async {
@@ -19,7 +21,12 @@ class VitsSimpleApiService implements VitsService {
       'vits.voice_list.started',
       fields: <String, Object?>{'endpoint': uri},
     );
-    final http.Response response = await _client.get(uri);
+    final http.Response response;
+    try {
+      response = await _client.get(uri).timeout(_requestTimeout);
+    } on TimeoutException {
+      throw const VitsException('获取角色列表超时，请检查 VITS 服务');
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       AppLogger.warning(
         'vits.voice_list.failed',
@@ -82,7 +89,12 @@ class VitsSimpleApiService implements VitsService {
         'text_characters': text.length,
       },
     );
-    final http.Response response = await _client.get(uri);
+    final http.Response response;
+    try {
+      response = await _client.get(uri).timeout(_requestTimeout);
+    } on TimeoutException {
+      throw const VitsException('语音合成超时，请检查 VITS 服务');
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       AppLogger.warning(
         'vits.synthesis.failed',

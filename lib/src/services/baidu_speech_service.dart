@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -6,6 +7,8 @@ import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
 class BaiduSpeechService {
+  static const Duration _requestTimeout = Duration(seconds: 20);
+
   String _accessToken = '';
   String _credentialKey = '';
   DateTime? _accessTokenExpiry;
@@ -56,22 +59,29 @@ class BaiduSpeechService {
     final String cuid = const Uuid().v4();
 
     final Uri url = Uri.parse('https://vop.baidu.com/server_api');
-    final http.Response response = await http.post(
-      url,
-      headers: <String, String>{
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: jsonEncode(<String, dynamic>{
-        'format': format,
-        'rate': rate,
-        'channel': channel,
-        'token': accessToken,
-        'cuid': cuid,
-        'speech': base64Speech,
-        'len': audioBytes.length,
-      }),
-    );
+    final http.Response response;
+    try {
+      response = await http
+          .post(
+            url,
+            headers: <String, String>{
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode(<String, dynamic>{
+              'format': format,
+              'rate': rate,
+              'channel': channel,
+              'token': accessToken,
+              'cuid': cuid,
+              'speech': base64Speech,
+              'len': audioBytes.length,
+            }),
+          )
+          .timeout(_requestTimeout);
+    } on TimeoutException {
+      throw const SpeechRecognitionException('语音识别请求超时，请检查网络后重试');
+    }
 
     if (response.statusCode != 200) {
       throw SpeechRecognitionException('语音识别请求失败: ${response.statusCode}');
@@ -112,10 +122,17 @@ class BaiduSpeechService {
           'client_secret': secretKey,
         });
 
-    final http.Response response = await http.post(
-      url,
-      headers: <String, String>{'Content-Type': 'application/json'},
-    );
+    final http.Response response;
+    try {
+      response = await http
+          .post(
+            url,
+            headers: <String, String>{'Content-Type': 'application/json'},
+          )
+          .timeout(_requestTimeout);
+    } on TimeoutException {
+      throw const SpeechRecognitionException('获取百度 Token 超时，请检查网络后重试');
+    }
 
     if (response.statusCode != 200) {
       return '';
