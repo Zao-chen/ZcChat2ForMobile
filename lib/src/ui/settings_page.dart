@@ -369,8 +369,20 @@ class _AboutPageState extends State<AboutPage> {
   Future<void> _openLogPath() async {
     final File logFile = widget.characterRepository.paths.logFile;
     if (await logFile.exists()) {
-      await _openUrl(Uri.file(logFile.path));
-      return;
+      try {
+        final OpenResult result = await OpenFilex.open(
+          logFile.path,
+          type: 'text/plain',
+        );
+        if (result.type == ResultType.done) {
+          return;
+        }
+      } catch (error) {
+        AppLogger.warning(
+          'log_file.open_failed',
+          fields: <String, Object?>{'message': error},
+        );
+      }
     }
 
     await Clipboard.setData(ClipboardData(text: logFile.path));
@@ -379,7 +391,7 @@ class _AboutPageState extends State<AboutPage> {
     }
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text('日志文件不存在，路径已复制: ${logFile.path}')));
+    ).showSnackBar(SnackBar(content: Text('无法打开日志，路径已复制: ${logFile.path}')));
   }
 
   Future<void> _onUpdateButtonPressed() async {
