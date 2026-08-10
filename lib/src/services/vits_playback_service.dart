@@ -1,8 +1,9 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/foundation.dart';
 
+import 'app_logger.dart';
 import 'vits_service.dart';
 
 class VitsPlaybackService implements VitsPlayback {
@@ -98,7 +99,10 @@ class VitsPlaybackService implements VitsPlayback {
         await _startNextPlayback();
       }
     } catch (error) {
-      debugPrint('VITS synthesis failed: $error');
+      AppLogger.warning(
+        'vits.synthesis.failed',
+        fields: <String, Object?>{'message': error},
+      );
     } finally {
       if (requestVersion == _requestVersion) {
         _requestInFlight = false;
@@ -123,7 +127,10 @@ class VitsPlaybackService implements VitsPlayback {
       try {
         await _player.play(BytesSource(audio.bytes));
       } catch (error) {
-        debugPrint('VITS playback failed: $error');
+        AppLogger.warning(
+          'vits.playback.failed',
+          fields: <String, Object?>{'message': error},
+        );
         _isPlaying = false;
         continue;
       }

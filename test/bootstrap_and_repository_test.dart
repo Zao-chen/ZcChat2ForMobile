@@ -197,7 +197,7 @@ void main() {
         ),
       );
 
-    final Uint8List zipBytes = Uint8List.fromList(ZipEncoder().encode(archive)!);
+    final Uint8List zipBytes = Uint8List.fromList(ZipEncoder().encode(archive));
     final String importedName = await characterRepository.importCharacterArchive(
       zipBytes,
       archiveName: 'sample.zip',

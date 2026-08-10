@@ -371,11 +371,12 @@ class _DialogPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xE6FFFFFF),
+        color: colors.surface.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0x1A000000)),
+        border: Border.all(color: colors.outlineVariant),
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 12, 6),
@@ -385,10 +386,10 @@ class _DialogPanel extends StatelessWidget {
           children: <Widget>[
             Text(
               characterName,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
-                color: Color(0xFF333333),
+                color: colors.onSurface,
               ),
             ),
             const SizedBox(height: 6),
@@ -407,7 +408,7 @@ class _DialogPanel extends StatelessWidget {
               },
               decoration: InputDecoration(
                 hintText: isSending ? '' : '说点什么吧',
-                hintStyle: const TextStyle(color: Color(0x80666666)),
+                hintStyle: TextStyle(color: colors.onSurfaceVariant),
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
                 focusedBorder: InputBorder.none,
@@ -418,13 +419,13 @@ class _DialogPanel extends StatelessWidget {
                       ? Icons.touch_app_rounded
                       : Icons.keyboard_return_rounded,
                   size: 18,
-                  color: const Color(0x80666666),
+                  color: colors.onSurfaceVariant,
                 ),
               ),
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 15,
                 height: 1.55,
-                color: Color(0xFF333333),
+                color: colors.onSurface,
               ),
             ),
             Row(
@@ -434,6 +435,7 @@ class _DialogPanel extends StatelessWidget {
                     onRecordStart: onRecordStart,
                     onRecordStop: onRecordStop,
                     isRecording: isRecording,
+                    speechState: speechState,
                     enabled:
                         isRecording ||
                         (speechState != SpeechInteractionState.recognizing &&
@@ -455,19 +457,19 @@ class _DialogPanel extends StatelessWidget {
                           child: Checkbox(
                             value: autoSend,
                             onChanged: onAutoSendChanged,
-                            activeColor: const Color(0xFF888888),
-                            side: const BorderSide(color: Color(0xFF888888)),
+                            activeColor: colors.primary,
+                            side: BorderSide(color: colors.outline),
                             materialTapTargetSize:
                                 MaterialTapTargetSize.shrinkWrap,
                             visualDensity: VisualDensity.compact,
                           ),
                         ),
                         const SizedBox(width: 2),
-                        const Text(
-                          '直接发送',
+                        Text(
+                          '识别后自动发送',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Color(0xFF888888),
+                            color: colors.onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -483,9 +485,9 @@ class _DialogPanel extends StatelessWidget {
                         speechState,
                         isManualRecording: isRecording,
                       ),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: Color(0xFF888888),
+                        color: colors.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -734,7 +736,7 @@ class _PluginAnimatedTachieState extends State<_PluginAnimatedTachie> {
   @override
   Widget build(BuildContext context) {
     final Matrix4 translate = Matrix4.identity()
-      ..translate(_transform.offset.dx, _transform.offset.dy);
+      ..translateByDouble(_transform.offset.dx, _transform.offset.dy, 0, 1);
 
     return AnimatedContainer(
       duration: _duration,
@@ -761,18 +763,19 @@ class _TachiePlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
       width: 250,
       height: 360,
       decoration: BoxDecoration(
-        color: const Color(0x26FFFFFF),
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x33FFFFFF)),
+        border: Border.all(color: colors.outlineVariant),
       ),
-      child: const Icon(
+      child: Icon(
         Icons.image_not_supported_outlined,
         size: 64,
-        color: Color(0xFFBBBBBB),
+        color: colors.onSurfaceVariant,
       ),
     );
   }
@@ -834,6 +837,7 @@ class _HistoryPopupState extends State<_HistoryPopup>
   @override
   Widget build(BuildContext context) {
     final double popupWidth = MediaQuery.of(context).size.width - 28;
+    final ColorScheme colors = Theme.of(context).colorScheme;
 
     return Positioned(
       left: 14,
@@ -849,11 +853,11 @@ class _HistoryPopupState extends State<_HistoryPopup>
             child: Container(
               width: popupWidth,
               decoration: BoxDecoration(
-                color: const Color(0xE6FFFFFF),
+                color: colors.surface.withValues(alpha: 0.94),
                 borderRadius: BorderRadius.circular(15),
                 boxShadow: <BoxShadow>[
                   BoxShadow(
-                    color: const Color(0x33000000),
+                    color: colors.shadow.withValues(alpha: 0.25),
                     blurRadius: 12,
                     spreadRadius: 2,
                   ),
@@ -863,10 +867,10 @@ class _HistoryPopupState extends State<_HistoryPopup>
                 children: <Widget>[
                   Expanded(
                     child: widget.entries.isEmpty
-                        ? const Center(
+                        ? Center(
                             child: Text(
                               '还没有历史记录',
-                              style: TextStyle(color: Color(0xFF888888)),
+                              style: TextStyle(color: colors.onSurfaceVariant),
                             ),
                           )
                         : ScrollConfiguration(
@@ -960,6 +964,7 @@ class _MicRecordButton extends StatefulWidget {
     required this.onRecordStart,
     required this.onRecordStop,
     required this.isRecording,
+    required this.speechState,
     required this.enabled,
     required this.tooltip,
   });
@@ -967,6 +972,7 @@ class _MicRecordButton extends StatefulWidget {
   final AsyncCallback onRecordStart;
   final AsyncCallback onRecordStop;
   final bool isRecording;
+  final SpeechInteractionState speechState;
   final bool enabled;
   final String tooltip;
 
@@ -980,13 +986,27 @@ class _MicRecordButtonState extends State<_MicRecordButton> {
 
   @override
   Widget build(BuildContext context) {
-    final Color borderColor = widget.isRecording
-        ? const Color(0xFFAAAAAA)
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool isListening =
+        widget.isRecording ||
+        widget.speechState == SpeechInteractionState.capturing;
+    final bool isReady =
+        widget.speechState == SpeechInteractionState.waitingForWake ||
+        widget.speechState == SpeechInteractionState.continuousReady;
+    final Color borderColor = isListening
+        ? colors.primary.withValues(alpha: 0.8)
         : _pressed
-        ? const Color(0xFFAAAAAA)
+        ? colors.outline
         : _hovered
-        ? const Color(0xFFCCCCCC)
-        : Colors.transparent;
+        ? colors.outlineVariant
+        : isReady
+        ? colors.tertiary.withValues(alpha: 0.55)
+        : colors.outlineVariant;
+    final Color backgroundColor = isListening
+        ? colors.primaryContainer.withValues(alpha: 0.55)
+        : isReady
+        ? colors.tertiaryContainer.withValues(alpha: 0.45)
+        : colors.surfaceContainerHighest.withValues(alpha: 0.45);
 
     return Tooltip(
       message: widget.tooltip,
@@ -1028,8 +1048,9 @@ class _MicRecordButtonState extends State<_MicRecordButton> {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 100),
             decoration: BoxDecoration(
-              border: Border.all(color: borderColor, width: 2),
-              borderRadius: BorderRadius.circular(5),
+              color: backgroundColor,
+              border: Border.all(color: borderColor),
+              borderRadius: BorderRadius.circular(7),
             ),
             padding: const EdgeInsets.all(6),
             child: SvgPicture.asset(
@@ -1037,8 +1058,11 @@ class _MicRecordButtonState extends State<_MicRecordButton> {
               width: 18,
               height: 18,
               colorFilter: widget.enabled
-                  ? null
-                  : const ColorFilter.mode(Color(0xFFBBBBBB), BlendMode.srcIn),
+                  ? ColorFilter.mode(colors.onSurface, BlendMode.srcIn)
+                  : ColorFilter.mode(
+                      colors.onSurface.withValues(alpha: 0.35),
+                      BlendMode.srcIn,
+                    ),
             ),
           ),
         ),
@@ -1086,10 +1110,11 @@ class _QtStyleButtonState extends State<_QtStyleButton> {
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final Color borderColor = _pressed
-        ? const Color(0xFFAAAAAA)
+        ? colors.outline
         : _hovered
-        ? const Color(0xFFCCCCCC)
+        ? colors.outlineVariant
         : Colors.transparent;
 
     return Tooltip(
@@ -1110,7 +1135,15 @@ class _QtStyleButtonState extends State<_QtStyleButton> {
               borderRadius: BorderRadius.circular(5),
             ),
             padding: const EdgeInsets.all(6),
-            child: SvgPicture.asset(widget.assetPath, width: 18, height: 18),
+            child: SvgPicture.asset(
+              widget.assetPath,
+              width: 18,
+              height: 18,
+              colorFilter: ColorFilter.mode(
+                colors.onSurfaceVariant,
+                BlendMode.srcIn,
+              ),
+            ),
           ),
         ),
       ),
@@ -1129,7 +1162,9 @@ class _ThinScrollbarBehavior extends ScrollBehavior {
       controller: details.controller,
       thickness: 8,
       radius: const Radius.circular(4),
-      thumbColor: const Color(0x80888888),
+      thumbColor: Theme.of(
+        context,
+      ).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
       crossAxisMargin: 2,
       child: child,
     );

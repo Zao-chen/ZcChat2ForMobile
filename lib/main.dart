@@ -5,6 +5,7 @@ import 'src/app.dart';
 import 'src/bootstrap/app_bootstrap.dart';
 import 'src/repositories/app_repositories.dart';
 import 'src/repositories/web_preview_storage.dart';
+import 'src/services/app_logger.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,5 +28,26 @@ Future<void> main() async {
   }
 
   final storagePaths = await AppBootstrap.ensureInitialized();
+  FlutterError.onError = (FlutterErrorDetails details) {
+    AppLogger.error(
+      'flutter.framework.error',
+      error: details.exception,
+      stackTrace: details.stack,
+      fields: <String, Object?>{'library': details.library ?? 'unknown'},
+    );
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stackTrace) {
+    AppLogger.error(
+      'flutter.platform.error',
+      error: error,
+      stackTrace: stackTrace,
+    );
+    return false;
+  };
+  AppLogger.info(
+    'application.start',
+    fields: <String, Object?>{'platform': defaultTargetPlatform.name},
+  );
   runApp(ZcChatApp(storagePaths: storagePaths));
 }

@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/app_models.dart';
 import '../models/anime_plugin_models.dart';
 import '../repositories/app_repositories.dart';
+import '../services/app_logger.dart';
 import '../services/llm_service.dart';
 import '../services/openai_compatible_llm_service.dart';
 import '../services/vits_service.dart';
@@ -195,6 +196,10 @@ class _AboutPageState extends State<AboutPage> {
   }
 
   Future<void> _checkUpdate() async {
+    AppLogger.info(
+      'update.check.started',
+      fields: <String, Object?>{'current_version': _appVersion},
+    );
     if (mounted) {
       setState(() {
         _isCheckingUpdate = true;
@@ -294,6 +299,14 @@ class _AboutPageState extends State<AboutPage> {
       if (!mounted) {
         return;
       }
+      AppLogger.info(
+        'update.check.completed',
+        fields: <String, Object?>{
+          'current_version': _appVersion,
+          'latest_version': latestTag ?? '',
+          'release_count': releaseList.length,
+        },
+      );
       setState(() {
         _releases = releaseList;
         _latestTagName = latestTag;
@@ -301,7 +314,12 @@ class _AboutPageState extends State<AboutPage> {
         _latestApkUrl = latestApkUrl;
         _statusText = statusText;
       });
-    } catch (error) {
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'update.check.failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (!mounted) {
         return;
       }
@@ -310,12 +328,11 @@ class _AboutPageState extends State<AboutPage> {
         _statusText = '获取新版本失败';
       });
     } finally {
-      if (!mounted) {
-        return;
+      if (mounted) {
+        setState(() {
+          _isCheckingUpdate = false;
+        });
       }
-      setState(() {
-        _isCheckingUpdate = false;
-      });
     }
   }
 
@@ -340,9 +357,7 @@ class _AboutPageState extends State<AboutPage> {
   }
 
   Future<void> _openLogPath() async {
-    final File logFile = File(
-      '${widget.characterRepository.paths.rootDirectory.path}${Platform.pathSeparator}log.txt',
-    );
+    final File logFile = widget.characterRepository.paths.logFile;
     if (await logFile.exists()) {
       await _openUrl(Uri.file(logFile.path));
       return;
@@ -388,6 +403,10 @@ class _AboutPageState extends State<AboutPage> {
     final http.Client client = http.Client();
     IOSink? sink;
     try {
+      AppLogger.info(
+        'update.download.started',
+        fields: <String, Object?>{'url': _latestApkUrl},
+      );
       final http.Request request = http.Request('GET', _latestApkUrl!);
       final http.StreamedResponse response = await client.send(request);
       if (response.statusCode != 200) {
@@ -430,6 +449,10 @@ class _AboutPageState extends State<AboutPage> {
       await sink.flush();
       await sink.close();
       sink = null;
+      AppLogger.info(
+        'update.download.completed',
+        fields: <String, Object?>{'file': apkFile.path, 'bytes': received},
+      );
 
       final OpenResult result = await OpenFilex.open(apkFile.path);
       if (!mounted) {
@@ -440,7 +463,12 @@ class _AboutPageState extends State<AboutPage> {
           _errorText = '安装器启动失败: ${result.message}';
         });
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'update.download.failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (mounted) {
         setState(() {
           _errorText = '下载失败: $error';
@@ -979,7 +1007,6 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
         return;
       }
       if (widget.service is CustomLlmService) {
-        debugPrint('[Settings] CustomLlmService.updateBaseUrl: $baseUrl');
         (widget.service as CustomLlmService).updateBaseUrl(baseUrl);
       }
     }
@@ -989,6 +1016,10 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
     });
 
     try {
+      AppLogger.info(
+        'settings.model_list.started',
+        fields: <String, Object?>{'provider': widget.provider.name},
+      );
       final List<String> models = await widget.service.fetchModels(apiKey);
       await widget.settingsRepository.saveProviderApiKey(
         widget.provider,
@@ -999,10 +1030,30 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
         models,
       );
       _appConfig = await widget.settingsRepository.loadAppConfig();
+      AppLogger.info(
+        'settings.model_list.completed',
+        fields: <String, Object?>{
+          'provider': widget.provider.name,
+          'model_count': models.length,
+        },
+      );
       _showSnackBar(models.isEmpty ? '未获取到模型列表' : '模型列表已刷新');
     } on LlmException catch (error) {
+      AppLogger.warning(
+        'settings.model_list.failed',
+        fields: <String, Object?>{
+          'provider': widget.provider.name,
+          'message': error.message,
+        },
+      );
       _showSnackBar(error.message);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'settings.model_list.failed',
+        error: error,
+        stackTrace: stackTrace,
+        fields: <String, Object?>{'provider': widget.provider.name},
+      );
       _showSnackBar('获取模型失败：$error');
     } finally {
       if (mounted) {
@@ -1041,6 +1092,9 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
             title: 'API Key',
             child: TextField(
               controller: _apiKeyController,
+              obscureText: true,
+              enableSuggestions: false,
+              autocorrect: false,
               decoration: const InputDecoration(
                 labelText: 'API Key',
                 filled: true,
@@ -1256,6 +1310,7 @@ class _VitsSimpleApiSettingsPageState extends State<VitsSimpleApiSettingsPage> {
     });
 
     try {
+      AppLogger.info('settings.vits_voice_list.started');
       final List<String> modelAndSpeakers = await widget.vitsService
           .fetchModelAndSpeakers(apiUrl);
       await widget.settingsRepository.saveVitsApiUrl(apiUrl);
@@ -1263,10 +1318,23 @@ class _VitsSimpleApiSettingsPageState extends State<VitsSimpleApiSettingsPage> {
         modelAndSpeakers,
       );
       _appConfig = await widget.settingsRepository.loadAppConfig();
+      AppLogger.info(
+        'settings.vits_voice_list.completed',
+        fields: <String, Object?>{'voice_count': modelAndSpeakers.length},
+      );
       _showSnackBar(modelAndSpeakers.isEmpty ? '未获取到角色列表' : '角色列表已刷新');
     } on VitsException catch (error) {
+      AppLogger.warning(
+        'settings.vits_voice_list.failed',
+        fields: <String, Object?>{'message': error.message},
+      );
       _showSnackBar(error.message);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'settings.vits_voice_list.failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
       _showSnackBar('获取角色列表失败：$error');
     } finally {
       if (mounted) {
@@ -1466,6 +1534,9 @@ class _SpeechInputSettingsPageState extends State<SpeechInputSettingsPage> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: _apiKeyController,
+                  obscureText: true,
+                  enableSuggestions: false,
+                  autocorrect: false,
                   decoration: const InputDecoration(
                     labelText: 'API Key',
                     filled: true,
@@ -1475,6 +1546,9 @@ class _SpeechInputSettingsPageState extends State<SpeechInputSettingsPage> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: _secretKeyController,
+                  obscureText: true,
+                  enableSuggestions: false,
+                  autocorrect: false,
                   decoration: const InputDecoration(
                     labelText: 'Secret Key',
                     filled: true,

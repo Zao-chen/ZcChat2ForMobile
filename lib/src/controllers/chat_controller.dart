@@ -9,6 +9,7 @@ import 'package:record/record.dart';
 import '../models/app_models.dart';
 import '../models/anime_plugin_models.dart';
 import '../repositories/app_repositories.dart';
+import '../services/app_logger.dart';
 import '../services/baidu_speech_service.dart';
 import '../services/llm_service.dart';
 import '../services/openai_compatible_llm_service.dart';
@@ -102,6 +103,18 @@ class ConversationController extends ChangeNotifier {
       selectedCharacter,
       currentMood,
     );
+    AppLogger.info(
+      'conversation.config.reloaded',
+      fields: <String, Object?>{
+        'character': selectedCharacter,
+        'provider': runtimeConfig.provider.name,
+        'model': runtimeConfig.modelSelect,
+        'credential_configured': appConfig
+            .providerConfig(runtimeConfig.provider)
+            .apiKey
+            .isNotEmpty,
+      },
+    );
 
     isLoading = false;
     await _resumeAutomaticListening();
@@ -162,14 +175,23 @@ class ConversationController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final String contextMessage = await conversationRepository
+          .buildUserMessageWithContext(userInput);
+      AppLogger.info(
+        'chat.request.started',
+        fields: <String, Object?>{
+          'provider': runtimeConfig.provider.name,
+          'model': runtimeConfig.modelSelect,
+          'input_characters': userInput.length,
+          'context_characters': contextMessage.length,
+        },
+      );
       await for (final ChatStreamEvent event in service.chatStream(
         ChatRequest(
           apiKey: providerConfig.apiKey,
           model: runtimeConfig.modelSelect,
           systemPrompt: _buildSystemPrompt(moods),
-          userMessage: await conversationRepository.buildUserMessageWithContext(
-            userInput,
-          ),
+          userMessage: contextMessage,
         ),
       )) {
         _rawReply = event.rawText;
@@ -188,11 +210,22 @@ class ConversationController extends ChangeNotifier {
         _rawReply,
       );
       if (parsed == null) {
+        AppLogger.warning(
+          'chat.response.invalid',
+          fields: <String, Object?>{'reply_characters': _rawReply.length},
+        );
         currentMood = 'default';
         currentDisplayText = _rawReply.trim().isEmpty
             ? '模型返回格式无效，请检查角色提示词或切换模型。'
             : '模型返回格式无效：${_rawReply.trim()}';
       } else {
+        AppLogger.info(
+          'chat.request.completed',
+          fields: <String, Object?>{
+            'mood': parsed.mood,
+            'reply_characters': parsed.chinese.length,
+          },
+        );
         currentMood = parsed.mood;
         currentDisplayText = parsed.chinese;
         await conversationRepository.appendUserLine(userInput);
@@ -201,9 +234,18 @@ class ConversationController extends ChangeNotifier {
         _queueFinalVitsSegments(parsed.japanese);
       }
     } on LlmException catch (error) {
+      AppLogger.warning(
+        'chat.request.failed',
+        fields: <String, Object?>{'message': error.message},
+      );
       currentMood = 'default';
       currentDisplayText = '请求失败：${error.message}';
-    } catch (error) {
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'chat.request.failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
       currentMood = 'default';
       currentDisplayText = '请求失败：$error';
     }
@@ -256,7 +298,12 @@ class ConversationController extends ChangeNotifier {
       isRecording = true;
       speechState = SpeechInteractionState.capturing;
       notifyListeners();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'speech.recording.start_failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
       _recordingBytes = null;
       currentDisplayText = '录音启动失败：$error';
       showContinueButton = true;
@@ -319,6 +366,14 @@ class ConversationController extends ChangeNotifier {
         secretKey: speechConfig.baiduSecretKey,
         audioBytes: pcmBytes,
       );
+      AppLogger.info(
+        'speech.recognition.completed',
+        fields: <String, Object?>{
+          'audio_bytes': pcmBytes.length,
+          'result_characters': recognized.length,
+          'automatic': false,
+        },
+      );
 
       if (recognized.isEmpty) {
         currentDisplayText = '语音识别结果为空。';
@@ -329,9 +384,19 @@ class ConversationController extends ChangeNotifier {
         pendingInputText = recognized;
       }
     } on SpeechRecognitionException catch (error) {
+      AppLogger.warning(
+        'speech.recognition.failed',
+        fields: <String, Object?>{'message': error.message, 'automatic': false},
+      );
       currentDisplayText = '语音识别失败：${error.message}';
       showContinueButton = true;
-    } catch (error) {
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'speech.recognition.failed',
+        error: error,
+        stackTrace: stackTrace,
+        fields: <String, Object?>{'automatic': false},
+      );
       currentDisplayText = '语音识别失败：$error';
       showContinueButton = true;
     }
@@ -373,7 +438,12 @@ class ConversationController extends ChangeNotifier {
       );
       _captureStreamActive = true;
       return true;
-    } catch (error) {
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'speech.capture.start_failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
       currentDisplayText = '录音启动失败：$error';
       showContinueButton = true;
       speechState = SpeechInteractionState.disabled;
@@ -453,6 +523,11 @@ class ConversationController extends ChangeNotifier {
   }
 
   void _handleAudioStreamError(Object error, StackTrace stackTrace) {
+    AppLogger.error(
+      'speech.capture.stream_failed',
+      error: error,
+      stackTrace: stackTrace,
+    );
     _captureStreamActive = false;
     _automaticListening = false;
     speechState = SpeechInteractionState.disabled;
@@ -482,6 +557,14 @@ class ConversationController extends ChangeNotifier {
         secretKey: config.baiduSecretKey,
         audioBytes: pcm,
       );
+      AppLogger.info(
+        'speech.recognition.completed',
+        fields: <String, Object?>{
+          'audio_bytes': pcm.length,
+          'result_characters': recognized.length,
+          'automatic': true,
+        },
+      );
       if (recognized.isEmpty) {
         return;
       }
@@ -508,9 +591,19 @@ class ConversationController extends ChangeNotifier {
         isSpeechSessionActive = false;
       }
     } on SpeechRecognitionException catch (error) {
+      AppLogger.warning(
+        'speech.recognition.failed',
+        fields: <String, Object?>{'message': error.message, 'automatic': true},
+      );
       currentDisplayText = '语音识别失败：${error.message}';
       showContinueButton = true;
-    } catch (error) {
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'speech.recognition.failed',
+        error: error,
+        stackTrace: stackTrace,
+        fields: <String, Object?>{'automatic': true},
+      );
       currentDisplayText = '语音识别失败：$error';
       showContinueButton = true;
     } finally {
