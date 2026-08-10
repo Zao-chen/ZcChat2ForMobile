@@ -222,7 +222,7 @@ class _ConversationPageState extends State<ConversationPage> {
   Widget build(BuildContext context) {
     final ConversationController controller = widget.controller;
     final double keyboardInset = MediaQuery.of(context).viewInsets.bottom;
-    final double dialogBottom = keyboardInset;
+    final double dialogBottom = math.max(12, keyboardInset + 12);
     const double dialogReservedHeight = 206;
 
     return Scaffold(
@@ -291,8 +291,8 @@ class _ConversationPageState extends State<ConversationPage> {
                     AnimatedPositioned(
                       duration: const Duration(milliseconds: 180),
                       curve: Curves.easeOut,
-                      left: 0,
-                      right: 0,
+                      left: 12,
+                      right: 12,
                       bottom: dialogBottom,
                       child: _DialogPanel(
                         inputController: _inputController,
@@ -397,18 +397,26 @@ class _DialogPanel extends StatelessWidget {
         ? '轻触这里继续对话'
         : '说点什么吧 (Shift+Enter换行 Enter发送)';
     return DecoratedBox(
-      decoration: const BoxDecoration(),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: colors.shadow.withValues(alpha: 0.18),
+            blurRadius: 26,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
       child: ClipRRect(
-        borderRadius: BorderRadius.zero,
+        borderRadius: BorderRadius.circular(18),
         child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: colors.surface.withValues(alpha: 0.9),
-              border: Border(
-                top: BorderSide(
-                  color: colors.outlineVariant.withValues(alpha: 0.35),
-                ),
+              color: colors.surface.withValues(alpha: 0.88),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: colors.outlineVariant.withValues(alpha: 0.55),
               ),
             ),
             child: Padding(
