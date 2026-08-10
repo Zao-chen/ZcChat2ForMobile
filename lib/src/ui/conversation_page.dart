@@ -222,7 +222,7 @@ class _ConversationPageState extends State<ConversationPage> {
     final ConversationController controller = widget.controller;
     final double keyboardInset = MediaQuery.of(context).viewInsets.bottom;
     final double dialogBottom = math.max(16, keyboardInset + 12);
-    const double dialogReservedHeight = 176;
+    const double dialogReservedHeight = 196;
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -305,6 +305,16 @@ class _ConversationPageState extends State<ConversationPage> {
                         wakeEnabled:
                             controller.appConfig.speechInput.wakeEnabled,
                         autoSend: controller.appConfig.speechInput.autoSend,
+                        contextTokenLimit: controller.contextTokenLimit,
+                        estimatedContextTokens:
+                            controller.estimatedContextTokens,
+                        contextProgressDescription:
+                            controller.contextProgressDescription,
+                        isCompactingContext: controller.isCompactingContext,
+                        onInputChanged: (String value) {
+                          controller.updateDraftContextEstimate(value);
+                          setState(() {});
+                        },
                         onSubmitted: _submitInput,
                         onContinue: controller.continueConversation,
                         onHistory: _showHistorySheet,
@@ -344,6 +354,11 @@ class _DialogPanel extends StatelessWidget {
     required this.speechEnabled,
     required this.wakeEnabled,
     required this.autoSend,
+    required this.contextTokenLimit,
+    required this.estimatedContextTokens,
+    required this.contextProgressDescription,
+    required this.isCompactingContext,
+    required this.onInputChanged,
     required this.onSubmitted,
     required this.onContinue,
     required this.onHistory,
@@ -362,6 +377,11 @@ class _DialogPanel extends StatelessWidget {
   final bool speechEnabled;
   final bool wakeEnabled;
   final bool autoSend;
+  final int contextTokenLimit;
+  final int estimatedContextTokens;
+  final String contextProgressDescription;
+  final bool isCompactingContext;
+  final ValueChanged<String> onInputChanged;
   final Future<void> Function() onSubmitted;
   final VoidCallback onContinue;
   final VoidCallback onHistory;
@@ -400,6 +420,7 @@ class _DialogPanel extends StatelessWidget {
               minLines: 4,
               maxLines: 6,
               textInputAction: TextInputAction.send,
+              onChanged: onInputChanged,
               onTap: showContinueButton ? onContinue : null,
               onSubmitted: (_) {
                 if (!showContinueButton) {
@@ -427,6 +448,13 @@ class _DialogPanel extends StatelessWidget {
                 height: 1.55,
                 color: colors.onSurface,
               ),
+            ),
+            const SizedBox(height: 6),
+            _ContextTokenProgress(
+              tokenLimit: contextTokenLimit,
+              estimatedTokens: estimatedContextTokens,
+              description: contextProgressDescription,
+              isCompacting: isCompactingContext,
             ),
             Row(
               children: <Widget>[
@@ -504,6 +532,80 @@ class _DialogPanel extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _ContextTokenProgress extends StatelessWidget {
+  const _ContextTokenProgress({
+    required this.tokenLimit,
+    required this.estimatedTokens,
+    required this.description,
+    required this.isCompacting,
+  });
+
+  final int tokenLimit;
+  final int estimatedTokens;
+  final String description;
+  final bool isCompacting;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final int remaining = tokenLimit <= 0
+        ? 0
+        : (tokenLimit - estimatedTokens).clamp(0, tokenLimit);
+    final double? progress = isCompacting
+        ? null
+        : tokenLimit <= 0
+        ? 0
+        : remaining / tokenLimit;
+    final bool exhausted = tokenLimit > 0 && remaining <= 0;
+    final bool nearlyExhausted =
+        tokenLimit > 0 && remaining <= math.max(1, tokenLimit ~/ 10);
+    final Color progressColor = exhausted
+        ? colors.error
+        : nearlyExhausted
+        ? colors.tertiary
+        : colors.onSurfaceVariant;
+    final String label = tokenLimit <= 0
+        ? 'Token --'
+        : '剩余 ${_compactTokenCount(remaining)}';
+
+    return Tooltip(
+      message: description,
+      triggerMode: TooltipTriggerMode.tap,
+      child: Semantics(
+        label: description,
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 4,
+                color: progressColor,
+                backgroundColor: colors.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              isCompacting ? '整理中…' : label,
+              style: TextStyle(fontSize: 11, color: colors.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _compactTokenCount(int tokens) {
+    if (tokens >= 1000000) {
+      return '${(tokens / 1000000).toStringAsFixed(tokens >= 10000000 ? 0 : 1)}M';
+    }
+    if (tokens >= 1000) {
+      return '${(tokens / 1000).toStringAsFixed(tokens >= 100000 ? 0 : 1)}K';
+    }
+    return tokens.toString();
   }
 }
 
@@ -843,7 +945,7 @@ class _HistoryPopupState extends State<_HistoryPopup>
       left: 14,
       right: 14,
       top: 15,
-      bottom: 176 + MediaQuery.of(context).viewInsets.bottom + 20,
+      bottom: 196 + MediaQuery.of(context).viewInsets.bottom + 20,
       child: SlideTransition(
         position: _offset,
         child: FadeTransition(
