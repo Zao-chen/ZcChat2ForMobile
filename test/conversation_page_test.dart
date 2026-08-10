@@ -65,6 +65,13 @@ void main() {
   testWidgets(
     'conversation page sends text and continues by tapping input box',
     (WidgetTester tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 844);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+
       final Directory tempDir = Directory.systemTemp.createTempSync(
         'zcchat2_page_test_',
       );
@@ -110,6 +117,9 @@ void main() {
         await characterRepository.saveCharacterModel('test', 'fake-model');
         await controller.initialize();
       });
+      controller.appConfig = controller.appConfig.copyWithSpeechInput(
+        controller.appConfig.speechInput.copyWith(enable: true),
+      );
 
       await tester.pumpWidget(
         MaterialApp(
@@ -121,6 +131,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      expect(find.text('你'), findsOneWidget);
+      expect(find.text('按住说话'), findsOneWidget);
+      expect(find.text('识别后自动发送'), findsOneWidget);
+
       await tester.enterText(find.byType(TextField), '你好');
       await tester.runAsync(() async {
         await tester.testTextInput.receiveAction(TextInputAction.send);
@@ -130,12 +144,12 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('今天天气很好'), findsOneWidget);
-      expect(find.byIcon(Icons.touch_app_rounded), findsOneWidget);
+      expect(find.text('轻触这里继续对话'), findsOneWidget);
 
       await tester.tap(find.byType(TextField));
       await tester.pumpAndSettle();
 
-      expect(find.byIcon(Icons.arrow_upward_rounded), findsOneWidget);
+      expect(find.text('说点什么吧 (Shift+Enter换行 Enter发送)'), findsOneWidget);
       controller.dispose();
     },
   );

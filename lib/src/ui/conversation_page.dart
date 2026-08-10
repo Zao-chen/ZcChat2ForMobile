@@ -222,7 +222,7 @@ class _ConversationPageState extends State<ConversationPage> {
   Widget build(BuildContext context) {
     final ConversationController controller = widget.controller;
     final double keyboardInset = MediaQuery.of(context).viewInsets.bottom;
-    final double dialogBottom = math.max(16, keyboardInset + 12);
+    final double dialogBottom = keyboardInset;
     const double dialogReservedHeight = 206;
 
     return Scaffold(
@@ -291,56 +291,47 @@ class _ConversationPageState extends State<ConversationPage> {
                     AnimatedPositioned(
                       duration: const Duration(milliseconds: 180),
                       curve: Curves.easeOut,
-                      left: 14,
-                      right: 14,
+                      left: 0,
+                      right: 0,
                       bottom: dialogBottom,
-                      child: Align(
-                        alignment: Alignment.bottomCenter,
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 720),
-                          child: _DialogPanel(
-                            characterName: controller.selectedCharacter,
-                            inputController: _inputController,
-                            isSending: controller.isSending,
-                            showContinueButton: controller.showContinueButton,
-                            isRecording: controller.isRecording,
-                            isRecognizing: controller.isRecognizing,
-                            speechState: controller.speechState,
-                            speechEnabled:
-                                controller.appConfig.speechInput.enable,
-                            wakeEnabled:
-                                controller.appConfig.speechInput.wakeEnabled,
-                            autoSend: controller.appConfig.speechInput.autoSend,
-                            contextTokenLimit: controller.contextTokenLimit,
-                            estimatedContextTokens:
-                                controller.estimatedContextTokens,
-                            contextProgressDescription:
-                                controller.contextProgressDescription,
-                            isCompactingContext: controller.isCompactingContext,
-                            onInputChanged: (String value) {
-                              controller.updateDraftContextEstimate(value);
-                              setState(() {});
-                            },
-                            onSubmitted: _submitInput,
-                            onContinue: controller.continueConversation,
-                            onHistory: _showHistorySheet,
-                            onAutoSendChanged: (bool? value) {
-                              final SpeechInputConfig old =
-                                  controller.appConfig.speechInput;
-                              controller.appConfig = controller.appConfig
-                                  .copyWithSpeechInput(
-                                    old.copyWith(autoSend: value ?? false),
-                                  );
-                              controller.settingsRepository
-                                  .saveSpeechInputConfig(
-                                    controller.appConfig.speechInput,
-                                  );
-                              setState(() {});
-                            },
-                            onRecordStart: controller.startRecording,
-                            onRecordStop: controller.stopRecording,
-                          ),
-                        ),
+                      child: _DialogPanel(
+                        inputController: _inputController,
+                        isSending: controller.isSending,
+                        showContinueButton: controller.showContinueButton,
+                        isRecording: controller.isRecording,
+                        isRecognizing: controller.isRecognizing,
+                        speechState: controller.speechState,
+                        speechEnabled: controller.appConfig.speechInput.enable,
+                        wakeEnabled:
+                            controller.appConfig.speechInput.wakeEnabled,
+                        autoSend: controller.appConfig.speechInput.autoSend,
+                        contextTokenLimit: controller.contextTokenLimit,
+                        estimatedContextTokens:
+                            controller.estimatedContextTokens,
+                        contextProgressDescription:
+                            controller.contextProgressDescription,
+                        isCompactingContext: controller.isCompactingContext,
+                        onInputChanged: (String value) {
+                          controller.updateDraftContextEstimate(value);
+                          setState(() {});
+                        },
+                        onSubmitted: _submitInput,
+                        onContinue: controller.continueConversation,
+                        onHistory: _showHistorySheet,
+                        onAutoSendChanged: (bool? value) {
+                          final SpeechInputConfig old =
+                              controller.appConfig.speechInput;
+                          controller.appConfig = controller.appConfig
+                              .copyWithSpeechInput(
+                                old.copyWith(autoSend: value ?? false),
+                              );
+                          controller.settingsRepository.saveSpeechInputConfig(
+                            controller.appConfig.speechInput,
+                          );
+                          setState(() {});
+                        },
+                        onRecordStart: controller.startRecording,
+                        onRecordStop: controller.stopRecording,
                       ),
                     ),
                   ],
@@ -353,7 +344,6 @@ class _ConversationPageState extends State<ConversationPage> {
 
 class _DialogPanel extends StatelessWidget {
   const _DialogPanel({
-    required this.characterName,
     required this.inputController,
     required this.isSending,
     required this.showContinueButton,
@@ -376,7 +366,6 @@ class _DialogPanel extends StatelessWidget {
     required this.onRecordStop,
   });
 
-  final String characterName;
   final TextEditingController inputController;
   final bool isSending;
   final bool showContinueButton;
@@ -402,112 +391,64 @@ class _DialogPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
     final bool waitingForInput = !isSending && !showContinueButton;
-    final bool hasDraft = inputController.text.trim().isNotEmpty;
-    final String statusLabel = isCompactingContext
-        ? '整理上下文'
-        : isSending
-        ? '正在回复'
+    final String hintText = isSending
+        ? '正在回复…'
         : showContinueButton
-        ? '轻触继续'
-        : '等待你的消息';
+        ? '轻触这里继续对话'
+        : '说点什么吧 (Shift+Enter换行 Enter发送)';
     return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: colors.shadow.withValues(alpha: 0.16),
-            blurRadius: 28,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
+      decoration: const BoxDecoration(),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.zero,
         child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: colors.surface.withValues(alpha: 0.88),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(
-                color: colors.outlineVariant.withValues(alpha: 0.7),
+              color: colors.surface.withValues(alpha: 0.9),
+              border: Border(
+                top: BorderSide(
+                  color: colors.outlineVariant.withValues(alpha: 0.35),
+                ),
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 14, 12),
+              padding: const EdgeInsets.fromLTRB(10, 8, 6, 6),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Row(
                     children: <Widget>[
-                      Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: colors.primaryContainer,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.auto_awesome_rounded,
-                          size: 18,
-                          color: colors.onPrimaryContainer,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Text(
-                              characterName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                                color: colors.onSurface,
-                              ),
-                            ),
-                            const SizedBox(height: 1),
-                            Row(
-                              children: <Widget>[
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    color: isSending
-                                        ? colors.tertiary
-                                        : colors.primary,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 5),
-                                Text(
-                                  statusLabel,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: colors.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
+                        child: Text(
+                          '你',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: colors.onSurface,
+                          ),
                         ),
                       ),
-                      _HeaderActionButton(
-                        tooltip: '历史记录',
-                        icon: Icons.history_rounded,
-                        onTap: onHistory,
+                      SizedBox(
+                        width: 210,
+                        child: _ContextTokenProgress(
+                          tokenLimit: contextTokenLimit,
+                          estimatedTokens: estimatedContextTokens,
+                          description: contextProgressDescription,
+                          isCompacting: isCompactingContext,
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 4),
                   TextField(
                     controller: inputController,
                     readOnly: !waitingForInput,
                     showCursor: waitingForInput,
-                    minLines: 2,
-                    maxLines: 4,
+                    minLines: 4,
+                    maxLines: 6,
                     textInputAction: TextInputAction.send,
                     onChanged: onInputChanged,
                     onTap: showContinueButton ? onContinue : null,
@@ -517,49 +458,24 @@ class _DialogPanel extends StatelessWidget {
                       }
                     },
                     decoration: InputDecoration(
-                      hintText: isSending ? '' : '说点什么吧…',
+                      hintText: hintText,
                       hintStyle: TextStyle(
-                        color: colors.onSurfaceVariant.withValues(alpha: 0.75),
+                        fontSize: 16,
+                        color: colors.onSurfaceVariant.withValues(alpha: 0.78),
                       ),
-                      filled: true,
-                      fillColor: colors.surfaceContainerHighest.withValues(
-                        alpha: 0.52,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide.none,
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide.none,
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide(
-                          color: colors.primary.withValues(alpha: 0.55),
-                          width: 1.4,
-                        ),
-                      ),
-                      contentPadding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
-                      suffixIcon: Padding(
-                        padding: const EdgeInsets.all(7),
-                        child: _SubmitButton(
-                          enabled: waitingForInput && hasDraft,
-                          showContinue: showContinueButton,
-                          isSending: isSending,
-                          onTap: showContinueButton
-                              ? onContinue
-                              : () => unawaited(onSubmitted()),
-                        ),
-                      ),
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      contentPadding: const EdgeInsets.only(top: 2),
                     ),
                     style: TextStyle(
-                      fontSize: 15,
+                      fontSize: 16,
                       height: 1.45,
                       color: colors.onSurface,
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 4),
                   Row(
                     children: <Widget>[
                       if (speechEnabled) ...<Widget>[
@@ -580,7 +496,7 @@ class _DialogPanel extends StatelessWidget {
                                       SpeechInteractionState.capturing),
                           tooltip: wakeEnabled ? '长按录音；松开后恢复语音唤醒' : '长按录音',
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 12),
                         _AutoSendChip(
                           selected: autoSend,
                           onChanged: onAutoSendChanged,
@@ -605,108 +521,17 @@ class _DialogPanel extends StatelessWidget {
                             ),
                           ),
                         ],
-                        const SizedBox(width: 10),
                       ],
-                      Expanded(
-                        child: _ContextTokenProgress(
-                          tokenLimit: contextTokenLimit,
-                          estimatedTokens: estimatedContextTokens,
-                          description: contextProgressDescription,
-                          isCompacting: isCompactingContext,
-                        ),
+                      const Spacer(),
+                      _QtStyleButton(
+                        tooltip: '历史记录',
+                        assetPath: 'assets/log-24.svg',
+                        onTap: onHistory,
                       ),
                     ],
                   ),
                 ],
               ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _HeaderActionButton extends StatelessWidget {
-  const _HeaderActionButton({
-    required this.tooltip,
-    required this.icon,
-    required this.onTap,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Ink(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: colors.surfaceContainerHighest.withValues(alpha: 0.65),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(icon, size: 19, color: colors.onSurfaceVariant),
-        ),
-      ),
-    );
-  }
-}
-
-class _SubmitButton extends StatelessWidget {
-  const _SubmitButton({
-    required this.enabled,
-    required this.showContinue,
-    required this.isSending,
-    required this.onTap,
-  });
-
-  final bool enabled;
-  final bool showContinue;
-  final bool isSending;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    final bool canTap = enabled || showContinue;
-    return Tooltip(
-      message: showContinue ? '继续对话' : '发送',
-      child: Material(
-        color: canTap
-            ? colors.primary
-            : colors.onSurface.withValues(alpha: 0.08),
-        shape: const CircleBorder(),
-        child: InkWell(
-          onTap: canTap ? onTap : null,
-          customBorder: const CircleBorder(),
-          child: SizedBox.square(
-            dimension: 38,
-            child: Center(
-              child: isSending
-                  ? SizedBox.square(
-                      dimension: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: colors.primary,
-                      ),
-                    )
-                  : Icon(
-                      showContinue
-                          ? Icons.touch_app_rounded
-                          : Icons.arrow_upward_rounded,
-                      size: 20,
-                      color: canTap
-                          ? colors.onPrimary
-                          : colors.onSurfaceVariant,
-                    ),
             ),
           ),
         ),
@@ -728,37 +553,29 @@ class _AutoSendChip extends StatelessWidget {
       message: '语音识别完成后直接发送',
       child: InkWell(
         onTap: () => onChanged(!selected),
-        borderRadius: BorderRadius.circular(10),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
+        borderRadius: BorderRadius.circular(6),
+        child: SizedBox(
           height: 36,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: selected
-                ? colors.secondaryContainer
-                : colors.surfaceContainerHighest.withValues(alpha: 0.55),
-            borderRadius: BorderRadius.circular(10),
-          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(
-                selected ? Icons.check_circle_rounded : Icons.circle_outlined,
-                size: 15,
-                color: selected
-                    ? colors.onSecondaryContainer
-                    : colors.onSurfaceVariant,
-              ),
-              const SizedBox(width: 5),
-              Text(
-                '自动发送',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: selected
-                      ? colors.onSecondaryContainer
-                      : colors.onSurfaceVariant,
+              IgnorePointer(
+                child: SizedBox.square(
+                  dimension: 24,
+                  child: Checkbox(
+                    value: selected,
+                    onChanged: onChanged,
+                    activeColor: colors.primary,
+                    side: BorderSide(color: colors.outline),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
                 ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '识别后自动发送',
+                style: TextStyle(fontSize: 14, color: colors.onSurface),
               ),
             ],
           ),
@@ -811,39 +628,28 @@ class _ContextTokenProgress extends StatelessWidget {
         label: description,
         child: Align(
           alignment: Alignment.centerRight,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 220),
-            child: Container(
-              height: 36,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              decoration: BoxDecoration(
-                color: colors.surfaceContainerHighest.withValues(alpha: 0.55),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: <Widget>[
-                  Icon(Icons.memory_rounded, size: 15, color: progressColor),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: LinearProgressIndicator(
-                      value: progress,
-                      minHeight: 4,
-                      color: progressColor,
-                      backgroundColor: colors.surfaceContainerLow,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
+          child: SizedBox(
+            height: 24,
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 5,
+                    color: progressColor,
+                    backgroundColor: colors.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(3),
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    isCompacting ? '整理中…' : label,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: colors.onSurfaceVariant,
-                    ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  isCompacting ? '整理中…' : label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colors.onSurfaceVariant,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
@@ -1198,7 +1004,7 @@ class _HistoryPopupState extends State<_HistoryPopup>
       left: 14,
       right: 14,
       top: 15,
-      bottom: 206 + MediaQuery.of(context).viewInsets.bottom + 20,
+      bottom: 206 + MediaQuery.of(context).viewInsets.bottom + 12,
       child: SlideTransition(
         position: _offset,
         child: FadeTransition(
@@ -1407,17 +1213,32 @@ class _MicRecordButtonState extends State<_MicRecordButton> {
               border: Border.all(color: borderColor),
               borderRadius: BorderRadius.circular(7),
             ),
-            padding: const EdgeInsets.all(6),
-            child: SvgPicture.asset(
-              'assets/microphone-solid.svg',
-              width: 18,
-              height: 18,
-              colorFilter: widget.enabled
-                  ? ColorFilter.mode(colors.onSurface, BlendMode.srcIn)
-                  : ColorFilter.mode(
-                      colors.onSurface.withValues(alpha: 0.35),
-                      BlendMode.srcIn,
-                    ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                SvgPicture.asset(
+                  'assets/microphone-solid.svg',
+                  width: 17,
+                  height: 17,
+                  colorFilter: widget.enabled
+                      ? ColorFilter.mode(colors.onSurface, BlendMode.srcIn)
+                      : ColorFilter.mode(
+                          colors.onSurface.withValues(alpha: 0.35),
+                          BlendMode.srcIn,
+                        ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  isListening ? '松开发送' : '按住说话',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: widget.enabled
+                        ? colors.onSurface
+                        : colors.onSurface.withValues(alpha: 0.35),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
