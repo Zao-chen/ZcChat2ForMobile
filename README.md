@@ -1,4 +1,6 @@
-﻿# ZcChat2 for Mobile
+
+
+# ZcChat2 for Mobile
 
 一个模仿 Galgame 演出效果的AI桌宠 —— [ZcChat2](https://github.com/Zao-chen/ZcChat2) 的移动端版本
 
@@ -12,6 +14,8 @@
 ## 🚀 快速入门
 
 使用方式与 [ZcChat2](https://github.com/Zao-chen/ZcChat2?tab=readme-ov-file#-%E5%BF%AB%E9%80%9F%E5%85%A5%E9%97%A8) 保持一致，角色与插件格式完全兼容，可直接上手使用。
+
+> 💡 **本地运行提示**：本项目基于 Flutter 开发（`pubspec.yaml` 限定 `sdk ^3.11.0`），克隆仓库后执行 `flutter pub get` 与 `flutter run` 即可。
 
 ## 🤗 如何贡献
 
