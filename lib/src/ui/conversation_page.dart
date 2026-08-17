@@ -395,7 +395,9 @@ class _DialogPanel extends StatelessWidget {
         ? '正在回复…'
         : showContinueButton
         ? '轻触这里继续对话'
-        : '说点什么吧 (Shift+Enter换行 Enter发送)';
+        : '说点什么吧';
+    final bool canSend =
+        waitingForInput && inputController.text.trim().isNotEmpty;
     return DecoratedBox(
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(18)),
       child: ClipRRect(
@@ -448,14 +450,10 @@ class _DialogPanel extends StatelessWidget {
                     showCursor: waitingForInput,
                     minLines: 4,
                     maxLines: 6,
-                    textInputAction: TextInputAction.send,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
                     onChanged: onInputChanged,
                     onTap: showContinueButton ? onContinue : null,
-                    onSubmitted: (_) {
-                      if (waitingForInput) {
-                        onSubmitted();
-                      }
-                    },
                     decoration: InputDecoration(
                       hintText: hintText,
                       hintStyle: TextStyle(
@@ -522,6 +520,30 @@ class _DialogPanel extends StatelessWidget {
                         ],
                       ],
                       const Spacer(),
+                      IconButton(
+                        key: const ValueKey<String>('send-message-button'),
+                        onPressed: canSend
+                            ? () => unawaited(onSubmitted())
+                            : null,
+                        tooltip: '发送消息',
+                        style: IconButton.styleFrom(
+                          foregroundColor: colors.onSurfaceVariant,
+                          disabledForegroundColor: colors.onSurfaceVariant
+                              .withValues(alpha: 0.28),
+                          hoverColor: colors.onSurfaceVariant.withValues(
+                            alpha: 0.08,
+                          ),
+                          highlightColor: colors.onSurfaceVariant.withValues(
+                            alpha: 0.12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        icon: const Icon(Icons.send_rounded, size: 26),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      const SizedBox(width: 2),
                       _QtStyleButton(
                         tooltip: '历史记录',
                         assetPath: 'assets/log-24.svg',
