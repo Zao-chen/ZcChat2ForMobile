@@ -1,5 +1,6 @@
-import 'dart:io';
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -14,7 +15,12 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/app_models.dart';
 import '../models/anime_plugin_models.dart';
 import '../repositories/app_repositories.dart';
+import '../services/app_logger.dart';
+import '../services/app_version.dart';
+import '../services/context_history_compressor.dart';
+import '../services/context_token_estimator.dart';
 import '../services/llm_service.dart';
+import '../services/model_context_catalog.dart';
 import '../services/openai_compatible_llm_service.dart';
 import '../services/vits_service.dart';
 
@@ -195,6 +201,10 @@ class _AboutPageState extends State<AboutPage> {
   }
 
   Future<void> _checkUpdate() async {
+    AppLogger.info(
+      'update.check.started',
+      fields: <String, Object?>{'current_version': _appVersion},
+    );
     if (mounted) {
       setState(() {
         _isCheckingUpdate = true;
@@ -203,7 +213,9 @@ class _AboutPageState extends State<AboutPage> {
     }
 
     try {
-      final http.Response response = await http.get(_releaseApiUri);
+      final http.Response response = await http
+          .get(_releaseApiUri)
+          .timeout(const Duration(seconds: 15));
       if (response.statusCode != 200) {
         throw Exception('请求失败(${response.statusCode})');
       }
@@ -214,12 +226,17 @@ class _AboutPageState extends State<AboutPage> {
       }
 
       final List<_ReleaseInfo> releaseList = <_ReleaseInfo>[];
+      Map<dynamic, dynamic>? latestRelease;
       bool matchedCurrentVersion = false;
       for (final Object item in decoded) {
         if (item is! Map) {
           continue;
         }
         final Map<dynamic, dynamic> rawMap = item;
+        if (rawMap['draft'] == true || rawMap['prerelease'] == true) {
+          continue;
+        }
+        latestRelease ??= rawMap;
         final String tagName = _normalizeVersion(
           rawMap['tag_name']?.toString() ?? '',
         );
@@ -253,14 +270,12 @@ class _AboutPageState extends State<AboutPage> {
       Uri? latestUrl;
       Uri? latestApkUrl;
       String? latestTag;
-      if (releaseList.isNotEmpty && decoded.first is Map) {
+      if (releaseList.isNotEmpty && latestRelease != null) {
         latestTag = releaseList.first.version;
         if (releaseList.first.htmlUrl.isNotEmpty) {
           latestUrl = Uri.tryParse(releaseList.first.htmlUrl);
         }
-        final Map<dynamic, dynamic> firstRelease =
-            decoded.first as Map<dynamic, dynamic>;
-        final Object? assetsObj = firstRelease['assets'];
+        final Object? assetsObj = latestRelease['assets'];
         if (assetsObj is List) {
           for (final Object assetObj in assetsObj) {
             if (assetObj is! Map) {
@@ -285,15 +300,23 @@ class _AboutPageState extends State<AboutPage> {
       final String statusText;
       if (latestTag == null || latestTag.isEmpty) {
         statusText = '获取新版本失败';
-      } else if (latestTag != _appVersion) {
+      } else if (isVersionNewer(latestTag, _appVersion)) {
         statusText = '发现新版本 v$latestTag';
       } else {
-        statusText = '当前为最新正式版';
+        statusText = '当前版本不低于最新正式版';
       }
 
       if (!mounted) {
         return;
       }
+      AppLogger.info(
+        'update.check.completed',
+        fields: <String, Object?>{
+          'current_version': _appVersion,
+          'latest_version': latestTag ?? '',
+          'release_count': releaseList.length,
+        },
+      );
       setState(() {
         _releases = releaseList;
         _latestTagName = latestTag;
@@ -301,7 +324,12 @@ class _AboutPageState extends State<AboutPage> {
         _latestApkUrl = latestApkUrl;
         _statusText = statusText;
       });
-    } catch (error) {
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'update.check.failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (!mounted) {
         return;
       }
@@ -310,12 +338,11 @@ class _AboutPageState extends State<AboutPage> {
         _statusText = '获取新版本失败';
       });
     } finally {
-      if (!mounted) {
-        return;
+      if (mounted) {
+        setState(() {
+          _isCheckingUpdate = false;
+        });
       }
-      setState(() {
-        _isCheckingUpdate = false;
-      });
     }
   }
 
@@ -340,12 +367,22 @@ class _AboutPageState extends State<AboutPage> {
   }
 
   Future<void> _openLogPath() async {
-    final File logFile = File(
-      '${widget.characterRepository.paths.rootDirectory.path}${Platform.pathSeparator}log.txt',
-    );
+    final File logFile = widget.characterRepository.paths.logFile;
     if (await logFile.exists()) {
-      await _openUrl(Uri.file(logFile.path));
-      return;
+      try {
+        final OpenResult result = await OpenFilex.open(
+          logFile.path,
+          type: 'text/plain',
+        );
+        if (result.type == ResultType.done) {
+          return;
+        }
+      } catch (error) {
+        AppLogger.warning(
+          'log_file.open_failed',
+          fields: <String, Object?>{'message': error},
+        );
+      }
     }
 
     await Clipboard.setData(ClipboardData(text: logFile.path));
@@ -354,14 +391,14 @@ class _AboutPageState extends State<AboutPage> {
     }
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text('日志文件不存在，路径已复制: ${logFile.path}')));
+    ).showSnackBar(SnackBar(content: Text('无法打开日志，路径已复制: ${logFile.path}')));
   }
 
   Future<void> _onUpdateButtonPressed() async {
     final bool hasNewVersion =
         _latestTagName != null &&
         _latestTagName!.isNotEmpty &&
-        _latestTagName != _appVersion;
+        isVersionNewer(_latestTagName!, _appVersion);
     if (!kIsWeb && hasNewVersion && _latestApkUrl != null) {
       await _downloadAndInstallLatestApk();
       return;
@@ -388,8 +425,14 @@ class _AboutPageState extends State<AboutPage> {
     final http.Client client = http.Client();
     IOSink? sink;
     try {
+      AppLogger.info(
+        'update.download.started',
+        fields: <String, Object?>{'url': _latestApkUrl},
+      );
       final http.Request request = http.Request('GET', _latestApkUrl!);
-      final http.StreamedResponse response = await client.send(request);
+      final http.StreamedResponse response = await client
+          .send(request)
+          .timeout(const Duration(seconds: 20));
       if (response.statusCode != 200) {
         throw Exception('下载失败(${response.statusCode})');
       }
@@ -430,6 +473,14 @@ class _AboutPageState extends State<AboutPage> {
       await sink.flush();
       await sink.close();
       sink = null;
+      if (received == 0 || (total > 0 && received != total)) {
+        await apkFile.delete();
+        throw const FormatException('下载文件不完整');
+      }
+      AppLogger.info(
+        'update.download.completed',
+        fields: <String, Object?>{'file': apkFile.path, 'bytes': received},
+      );
 
       final OpenResult result = await OpenFilex.open(apkFile.path);
       if (!mounted) {
@@ -440,7 +491,12 @@ class _AboutPageState extends State<AboutPage> {
           _errorText = '安装器启动失败: ${result.message}';
         });
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'update.download.failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (mounted) {
         setState(() {
           _errorText = '下载失败: $error';
@@ -469,7 +525,7 @@ class _AboutPageState extends State<AboutPage> {
     final bool hasNewVersion =
         _latestTagName != null &&
         _latestTagName!.isNotEmpty &&
-        _latestTagName != _appVersion;
+        isVersionNewer(_latestTagName!, _appVersion);
     final String updateButtonText = _isDownloadingApk
         ? (_downloadProgressKnown
               ? '下载中 ${(100 * _downloadProgress).toStringAsFixed(0)}%'
@@ -886,8 +942,8 @@ class LlmSettingsHomePage extends StatelessWidget {
               icon: provider == LlmProviderType.openAI
                   ? Icons.auto_awesome_outlined
                   : provider == LlmProviderType.custom
-                      ? Icons.dns_rounded
-                      : Icons.memory_rounded,
+                  ? Icons.dns_rounded
+                  : Icons.memory_rounded,
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute<void>(
@@ -979,7 +1035,6 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
         return;
       }
       if (widget.service is CustomLlmService) {
-        debugPrint('[Settings] CustomLlmService.updateBaseUrl: $baseUrl');
         (widget.service as CustomLlmService).updateBaseUrl(baseUrl);
       }
     }
@@ -989,6 +1044,10 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
     });
 
     try {
+      AppLogger.info(
+        'settings.model_list.started',
+        fields: <String, Object?>{'provider': widget.provider.name},
+      );
       final List<String> models = await widget.service.fetchModels(apiKey);
       await widget.settingsRepository.saveProviderApiKey(
         widget.provider,
@@ -999,10 +1058,30 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
         models,
       );
       _appConfig = await widget.settingsRepository.loadAppConfig();
+      AppLogger.info(
+        'settings.model_list.completed',
+        fields: <String, Object?>{
+          'provider': widget.provider.name,
+          'model_count': models.length,
+        },
+      );
       _showSnackBar(models.isEmpty ? '未获取到模型列表' : '模型列表已刷新');
     } on LlmException catch (error) {
+      AppLogger.warning(
+        'settings.model_list.failed',
+        fields: <String, Object?>{
+          'provider': widget.provider.name,
+          'message': error.message,
+        },
+      );
       _showSnackBar(error.message);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'settings.model_list.failed',
+        error: error,
+        stackTrace: stackTrace,
+        fields: <String, Object?>{'provider': widget.provider.name},
+      );
       _showSnackBar('获取模型失败：$error');
     } finally {
       if (mounted) {
@@ -1028,9 +1107,9 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final List<String> models = _appConfig
-        .providerConfig(widget.provider)
-        .models;
+    final List<String> models = normalizeModelIds(
+      _appConfig.providerConfig(widget.provider).models,
+    );
 
     return Scaffold(
       appBar: AppBar(title: Text(widget.provider.label)),
@@ -1041,6 +1120,9 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
             title: 'API Key',
             child: TextField(
               controller: _apiKeyController,
+              obscureText: true,
+              enableSuggestions: false,
+              autocorrect: false,
               decoration: const InputDecoration(
                 labelText: 'API Key',
                 filled: true,
@@ -1256,6 +1338,7 @@ class _VitsSimpleApiSettingsPageState extends State<VitsSimpleApiSettingsPage> {
     });
 
     try {
+      AppLogger.info('settings.vits_voice_list.started');
       final List<String> modelAndSpeakers = await widget.vitsService
           .fetchModelAndSpeakers(apiUrl);
       await widget.settingsRepository.saveVitsApiUrl(apiUrl);
@@ -1263,10 +1346,23 @@ class _VitsSimpleApiSettingsPageState extends State<VitsSimpleApiSettingsPage> {
         modelAndSpeakers,
       );
       _appConfig = await widget.settingsRepository.loadAppConfig();
+      AppLogger.info(
+        'settings.vits_voice_list.completed',
+        fields: <String, Object?>{'voice_count': modelAndSpeakers.length},
+      );
       _showSnackBar(modelAndSpeakers.isEmpty ? '未获取到角色列表' : '角色列表已刷新');
     } on VitsException catch (error) {
+      AppLogger.warning(
+        'settings.vits_voice_list.failed',
+        fields: <String, Object?>{'message': error.message},
+      );
       _showSnackBar(error.message);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'settings.vits_voice_list.failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
       _showSnackBar('获取角色列表失败：$error');
     } finally {
       if (mounted) {
@@ -1413,8 +1509,9 @@ class _SpeechInputSettingsPageState extends State<SpeechInputSettingsPage> {
         _appConfig.speechInput.copyWith(enable: value),
       );
     });
-    await widget.settingsRepository
-        .saveSpeechInputConfig(_appConfig.speechInput);
+    await widget.settingsRepository.saveSpeechInputConfig(
+      _appConfig.speechInput,
+    );
   }
 
   Future<void> _toggleAutoSend(bool value) async {
@@ -1423,8 +1520,20 @@ class _SpeechInputSettingsPageState extends State<SpeechInputSettingsPage> {
         _appConfig.speechInput.copyWith(autoSend: value),
       );
     });
-    await widget.settingsRepository
-        .saveSpeechInputConfig(_appConfig.speechInput);
+    await widget.settingsRepository.saveSpeechInputConfig(
+      _appConfig.speechInput,
+    );
+  }
+
+  Future<void> _toggleWakeEnabled(bool value) async {
+    setState(() {
+      _appConfig = _appConfig.copyWithSpeechInput(
+        _appConfig.speechInput.copyWith(wakeEnabled: value),
+      );
+    });
+    await widget.settingsRepository.saveSpeechInputConfig(
+      _appConfig.speechInput,
+    );
   }
 
   @override
@@ -1453,6 +1562,9 @@ class _SpeechInputSettingsPageState extends State<SpeechInputSettingsPage> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: _apiKeyController,
+                  obscureText: true,
+                  enableSuggestions: false,
+                  autocorrect: false,
                   decoration: const InputDecoration(
                     labelText: 'API Key',
                     filled: true,
@@ -1462,6 +1574,9 @@ class _SpeechInputSettingsPageState extends State<SpeechInputSettingsPage> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: _secretKeyController,
+                  obscureText: true,
+                  enableSuggestions: false,
+                  autocorrect: false,
                   decoration: const InputDecoration(
                     labelText: 'Secret Key',
                     filled: true,
@@ -1479,9 +1594,16 @@ class _SpeechInputSettingsPageState extends State<SpeechInputSettingsPage> {
                 SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
                   value: speechConfig.enable,
-                  title: const Text('启用长按输入按钮'),
-                  subtitle: const Text('在对话面板显示麦克风按钮，长按录音'),
+                  title: const Text('启用语音输入'),
+                  subtitle: const Text('显示麦克风按钮并允许长按录音'),
                   onChanged: _toggleEnable,
+                ),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  value: speechConfig.wakeEnabled,
+                  title: const Text('启用语音唤醒和连续对话'),
+                  subtitle: const Text('持续在本地检测人声，识别结果会用于匹配当前角色的唤醒词'),
+                  onChanged: speechConfig.enable ? _toggleWakeEnabled : null,
                 ),
                 SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
@@ -1515,9 +1637,19 @@ class CharacterSettingsPage extends StatefulWidget {
 
 class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
   final TextEditingController _promptController = TextEditingController();
+  final TextEditingController _wakeWordsController = TextEditingController();
+  final TextEditingController _endWordsController = TextEditingController();
+  final TextEditingController _contextTokenLimitController =
+      TextEditingController();
+  final ModelContextCatalogService _modelContextCatalogService =
+      ModelContextCatalogService();
 
   bool _isLoading = true;
   bool _isImporting = false;
+  bool _isResolvingContextLimit = false;
+  bool _contextLimitResolutionPending = false;
+  bool _pendingContextLimitForceRefresh = false;
+  String _contextLimitStatus = '';
   List<String> _characters = const <String>[];
   String _selectedCharacter = 'test';
   CharacterAssetConfig _assetConfig = const CharacterAssetConfig();
@@ -1533,6 +1665,10 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
   @override
   void dispose() {
     _promptController.dispose();
+    _wakeWordsController.dispose();
+    _endWordsController.dispose();
+    _contextTokenLimitController.dispose();
+    _modelContextCatalogService.dispose();
     super.dispose();
   }
 
@@ -1547,6 +1683,9 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
         .characterRepository
         .loadCharacterRuntimeConfig(selectedCharacter);
     final AppConfig appConfig = await widget.settingsRepository.loadAppConfig();
+    if (!mounted) {
+      return;
+    }
 
     _characters = characters;
     _selectedCharacter = selectedCharacter;
@@ -1554,11 +1693,26 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
     _runtimeConfig = runtimeConfig;
     _appConfig = appConfig;
     _promptController.text = assetConfig.prompt;
+    _wakeWordsController.text =
+        (assetConfig.speechInput.wakeWords.isEmpty
+                ? <String>[selectedCharacter]
+                : assetConfig.speechInput.wakeWords)
+            .join(' | ');
+    _endWordsController.text =
+        (assetConfig.speechInput.endWords.isEmpty
+                ? const <String>['结束对话']
+                : assetConfig.speechInput.endWords)
+            .join(' | ');
+    _contextTokenLimitController.text = _effectiveContextTokenLimit(
+      runtimeConfig,
+    ).toString();
+    _contextLimitStatus = _contextLimitStatusFor(runtimeConfig);
 
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
+    setState(() {
+      _isLoading = false;
+    });
+    if (_shouldResolveContextLimit(runtimeConfig)) {
+      unawaited(_resolveContextTokenLimit());
     }
   }
 
@@ -1620,6 +1774,29 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
     );
   }
 
+  Future<void> _saveSpeechWords({
+    required String wakeWords,
+    required String endWords,
+  }) async {
+    List<String> parse(String value) {
+      return value
+          .split('|')
+          .map((String word) => word.trim())
+          .where((String word) => word.isNotEmpty)
+          .toList(growable: false);
+    }
+
+    final CharacterSpeechConfig speechInput = CharacterSpeechConfig(
+      wakeWords: parse(wakeWords),
+      endWords: parse(endWords),
+    );
+    _assetConfig = _assetConfig.copyWith(speechInput: speechInput);
+    await widget.characterRepository.saveCharacterSpeechConfig(
+      _selectedCharacter,
+      speechInput,
+    );
+  }
+
   Future<void> _saveTachieSize(double value) async {
     final int size = value.round();
     setState(() {
@@ -1648,7 +1825,15 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
       _runtimeConfig = _runtimeConfig.copyWith(
         serverSelect: provider.configKey,
         modelSelect: '',
+        contextTokenLimit: ContextTokenEstimator.defaultContextTokenLimit,
+        contextTokenLimitSource: '',
+        contextTokenModel: '',
+        contextTokenProvider: '',
       );
+      _contextTokenLimitController.text = ContextTokenEstimator
+          .defaultContextTokenLimit
+          .toString();
+      _contextLimitStatus = '选择模型后可设置上下文上限';
     });
     await widget.characterRepository.saveCharacterProvider(
       _selectedCharacter,
@@ -1666,11 +1851,225 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
       return;
     }
     setState(() {
-      _runtimeConfig = _runtimeConfig.copyWith(modelSelect: model);
+      _runtimeConfig = _runtimeConfig.copyWith(
+        modelSelect: model,
+        contextTokenLimit: ContextTokenEstimator.defaultContextTokenLimit,
+        contextTokenLimitSource: 'auto',
+        contextTokenModel: model,
+        contextTokenProvider: _runtimeConfig.serverSelect,
+      );
+      _contextTokenLimitController.text = ContextTokenEstimator
+          .defaultContextTokenLimit
+          .toString();
+      _contextLimitStatus = '正在根据 Models.dev 自动识别';
     });
     await widget.characterRepository.saveCharacterModel(
       _selectedCharacter,
       model,
+    );
+    await widget.characterRepository.saveCharacterContextTokenLimit(
+      _selectedCharacter,
+      tokenLimit: ContextTokenEstimator.defaultContextTokenLimit,
+      source: 'auto',
+      model: model,
+      provider: _runtimeConfig.serverSelect,
+    );
+    if (!mounted) {
+      return;
+    }
+    await _resolveContextTokenLimit();
+  }
+
+  int _effectiveContextTokenLimit(CharacterRuntimeConfig config) {
+    final bool matches = ModelContextCatalog.selectionMatches(
+      storedProvider: config.contextTokenProvider,
+      storedModel: config.contextTokenModel,
+      currentProvider: config.serverSelect,
+      currentModel: config.modelSelect,
+    );
+    return ContextTokenEstimator.tokenLimitForSelection(
+      config.contextTokenLimit,
+      selectionMatches: matches,
+    );
+  }
+
+  bool _shouldResolveContextLimit(CharacterRuntimeConfig config) {
+    if (config.modelSelect.trim().isEmpty) {
+      return false;
+    }
+    final bool matches = ModelContextCatalog.selectionMatches(
+      storedProvider: config.contextTokenProvider,
+      storedModel: config.contextTokenModel,
+      currentProvider: config.serverSelect,
+      currentModel: config.modelSelect,
+    );
+    return !(config.contextTokenLimitSource == 'manual' && matches);
+  }
+
+  String _contextLimitStatusFor(CharacterRuntimeConfig config) {
+    if (config.modelSelect.trim().isEmpty) {
+      return '选择模型后可设置上下文上限';
+    }
+    final bool matches = ModelContextCatalog.selectionMatches(
+      storedProvider: config.contextTokenProvider,
+      storedModel: config.contextTokenModel,
+      currentProvider: config.serverSelect,
+      currentModel: config.modelSelect,
+    );
+    return switch (config.contextTokenLimitSource) {
+      'models.dev' when matches => '已根据 Models.dev 自动识别',
+      'manual' when matches => '当前为手动设置',
+      'auto' when matches => '自动识别失败时保留当前值',
+      _ => '将优先自动识别；查不到时可手动设置',
+    };
+  }
+
+  Future<void> _resolveContextTokenLimit({bool forceRefresh = false}) async {
+    final String requestedCharacter = _selectedCharacter;
+    final String requestedModel = _runtimeConfig.modelSelect.trim();
+    final LlmProviderType requestedProvider = _runtimeConfig.provider;
+    if (requestedModel.isEmpty) {
+      return;
+    }
+    if (_isResolvingContextLimit) {
+      _contextLimitResolutionPending = true;
+      _pendingContextLimitForceRefresh |= forceRefresh;
+      return;
+    }
+    setState(() {
+      _isResolvingContextLimit = true;
+      _contextLimitStatus = '正在根据 Models.dev 自动识别';
+    });
+    try {
+      final ModelContextMatch match = await _modelContextCatalogService.resolve(
+        provider: requestedProvider,
+        modelId: requestedModel,
+        forceRefresh: forceRefresh,
+      );
+      if (!mounted ||
+          _selectedCharacter != requestedCharacter ||
+          _runtimeConfig.modelSelect.trim().toLowerCase() !=
+              requestedModel.toLowerCase() ||
+          _runtimeConfig.provider != requestedProvider) {
+        return;
+      }
+      if (!match.isValid) {
+        setState(() {
+          _contextLimitStatus = 'Models.dev 未找到该模型，保留当前值';
+        });
+        return;
+      }
+      final int tokenLimit = match.contextTokenLimit.clamp(
+        ContextTokenEstimator.minimumContextTokenLimit,
+        ContextTokenEstimator.maximumContextTokenLimit,
+      );
+      await widget.characterRepository.saveCharacterContextTokenLimit(
+        requestedCharacter,
+        tokenLimit: tokenLimit,
+        source: 'models.dev',
+        model: requestedModel,
+        provider: requestedProvider.configKey,
+      );
+      if (!mounted ||
+          _selectedCharacter != requestedCharacter ||
+          _runtimeConfig.modelSelect.trim().toLowerCase() !=
+              requestedModel.toLowerCase() ||
+          _runtimeConfig.provider != requestedProvider) {
+        return;
+      }
+      setState(() {
+        _runtimeConfig = _runtimeConfig.copyWith(
+          contextTokenLimit: tokenLimit,
+          contextTokenLimitSource: 'models.dev',
+          contextTokenModel: requestedModel,
+          contextTokenProvider: requestedProvider.configKey,
+        );
+        _contextTokenLimitController.text = tokenLimit.toString();
+        _contextLimitStatus = '已根据 Models.dev 自动识别：${match.canonicalModelId}';
+      });
+      AppLogger.info(
+        'model_context.lookup.completed',
+        fields: <String, Object?>{
+          'provider': requestedProvider.name,
+          'model': requestedModel,
+          'canonical_model': match.canonicalModelId,
+          'context_tokens': tokenLimit,
+        },
+      );
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'model_context.lookup.failed',
+        error: error,
+        stackTrace: stackTrace,
+        fields: <String, Object?>{'model': requestedModel},
+      );
+      if (mounted &&
+          _selectedCharacter == requestedCharacter &&
+          _runtimeConfig.modelSelect.trim().toLowerCase() ==
+              requestedModel.toLowerCase() &&
+          _runtimeConfig.provider == requestedProvider) {
+        setState(() {
+          _contextLimitStatus = 'Models.dev 访问失败，保留当前值';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isResolvingContextLimit = false;
+        });
+        if (_contextLimitResolutionPending) {
+          final bool pendingForceRefresh = _pendingContextLimitForceRefresh;
+          _contextLimitResolutionPending = false;
+          _pendingContextLimitForceRefresh = false;
+          unawaited(
+            _resolveContextTokenLimit(forceRefresh: pendingForceRefresh),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _saveManualContextTokenLimit(String value) async {
+    final int? parsed = int.tryParse(value.trim());
+    if (parsed == null ||
+        parsed < ContextTokenEstimator.minimumContextTokenLimit ||
+        parsed > ContextTokenEstimator.maximumContextTokenLimit) {
+      _showSnackBar('上下文上限需在 1,024 到 10,000,000 Token 之间');
+      _contextTokenLimitController.text = _effectiveContextTokenLimit(
+        _runtimeConfig,
+      ).toString();
+      return;
+    }
+    setState(() {
+      _runtimeConfig = _runtimeConfig.copyWith(
+        contextTokenLimit: parsed,
+        contextTokenLimitSource: 'manual',
+        contextTokenModel: _runtimeConfig.modelSelect,
+        contextTokenProvider: _runtimeConfig.serverSelect,
+      );
+      _contextLimitStatus = '当前为手动设置';
+    });
+    await widget.characterRepository.saveCharacterContextTokenLimit(
+      _selectedCharacter,
+      tokenLimit: parsed,
+      source: 'manual',
+      model: _runtimeConfig.modelSelect,
+      provider: _runtimeConfig.serverSelect,
+    );
+  }
+
+  Future<void> _saveContextAutoCompactThreshold(double value) async {
+    final int percent = ContextHistoryCompressor.validatedTriggerPercent(
+      value.round(),
+    );
+    setState(() {
+      _runtimeConfig = _runtimeConfig.copyWith(
+        contextAutoCompactThresholdPercent: percent,
+      );
+    });
+    await widget.characterRepository.saveCharacterContextAutoCompactThreshold(
+      _selectedCharacter,
+      percent,
     );
   }
 
@@ -1712,9 +2111,9 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final List<String> modelList = _appConfig
-        .providerConfig(_runtimeConfig.provider)
-        .models;
+    final List<String> modelList = normalizeModelIds(
+      _appConfig.providerConfig(_runtimeConfig.provider).models,
+    );
     final List<String> vitsList = _appConfig.vits.modelAndSpeakers;
     final String? selectedVitsItem =
         vitsList.contains(_runtimeConfig.vitsMasSelect) &&
@@ -1778,6 +2177,41 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
                 filled: true,
               ),
               onChanged: _savePrompt,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SettingsSection(
+            title: '语音唤醒',
+            child: Column(
+              children: <Widget>[
+                TextField(
+                  controller: _wakeWordsController,
+                  decoration: const InputDecoration(
+                    labelText: '语音唤醒词',
+                    hintText: '例如：角色名 | 小助手',
+                    helperText: '多个词使用 | 分隔；留空时默认使用角色名',
+                    filled: true,
+                  ),
+                  onChanged: (String value) => _saveSpeechWords(
+                    wakeWords: value,
+                    endWords: _endWordsController.text,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _endWordsController,
+                  decoration: const InputDecoration(
+                    labelText: '连续对话结束词',
+                    hintText: '例如：结束对话 | 再见',
+                    helperText: '结束词所在的整句仍会发送，回复完成后退出连续对话',
+                    filled: true,
+                  ),
+                  onChanged: (String value) => _saveSpeechWords(
+                    wakeWords: _wakeWordsController.text,
+                    endWords: value,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 16),
@@ -1856,7 +2290,74 @@ class _CharacterSettingsPageState extends State<CharacterSettingsPage> {
                         ),
                       )
                       .toList(growable: false),
-                  onChanged: modelList.isEmpty ? null : _changeModel,
+                  onChanged: modelList.isEmpty || _isResolvingContextLimit
+                      ? null
+                      : _changeModel,
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _contextTokenLimitController,
+                  enabled: _runtimeConfig.modelSelect.isNotEmpty,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: <TextInputFormatter>[
+                    FilteringTextInputFormatter.digitsOnly,
+                  ],
+                  decoration: InputDecoration(
+                    labelText: '上下文上限',
+                    suffixText: 'Token',
+                    helperText: _contextLimitStatus,
+                    helperMaxLines: 2,
+                    suffixIcon: IconButton(
+                      tooltip: '从 Models.dev 重新获取',
+                      onPressed:
+                          _runtimeConfig.modelSelect.isEmpty ||
+                              _isResolvingContextLimit
+                          ? null
+                          : () => _resolveContextTokenLimit(forceRefresh: true),
+                      icon: _isResolvingContextLimit
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.auto_awesome_rounded),
+                    ),
+                  ),
+                  onSubmitted: _saveManualContextTokenLimit,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  '自动压缩阈值：'
+                  '${_runtimeConfig.contextAutoCompactThresholdPercent}%',
+                ),
+                Slider(
+                  min: ContextHistoryCompressor.minimumTriggerPercent
+                      .toDouble(),
+                  max: ContextHistoryCompressor.maximumTriggerPercent
+                      .toDouble(),
+                  divisions:
+                      ContextHistoryCompressor.maximumTriggerPercent -
+                      ContextHistoryCompressor.minimumTriggerPercent,
+                  value: _runtimeConfig.contextAutoCompactThresholdPercent
+                      .toDouble(),
+                  label:
+                      '${_runtimeConfig.contextAutoCompactThresholdPercent}%',
+                  onChanged: _runtimeConfig.modelSelect.isEmpty
+                      ? null
+                      : (double value) {
+                          setState(() {
+                            _runtimeConfig = _runtimeConfig.copyWith(
+                              contextAutoCompactThresholdPercent: value.round(),
+                            );
+                          });
+                        },
+                  onChangeEnd: _runtimeConfig.modelSelect.isEmpty
+                      ? null
+                      : _saveContextAutoCompactThreshold,
+                ),
+                Text(
+                  '达到该使用率时，会额外调用当前模型整理较早对话；'
+                  '完整历史不会删除。Token 为本地估算，实际值以服务商为准。',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
             ),

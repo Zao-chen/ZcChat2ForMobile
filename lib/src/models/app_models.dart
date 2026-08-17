@@ -1,4 +1,16 @@
-﻿class ModelProviderConfig {
+List<String> normalizeModelIds(Iterable<String> models) {
+  final Set<String> seen = <String>{};
+  final List<String> normalized = <String>[];
+  for (final String rawModel in models) {
+    final String model = rawModel.trim();
+    if (model.isNotEmpty && seen.add(model)) {
+      normalized.add(model);
+    }
+  }
+  return List<String>.unmodifiable(normalized);
+}
+
+class ModelProviderConfig {
   const ModelProviderConfig({
     this.apiKey = '',
     this.baseUrl = '',
@@ -17,14 +29,14 @@
     return ModelProviderConfig(
       apiKey: apiKey ?? this.apiKey,
       baseUrl: baseUrl ?? this.baseUrl,
-      models: models ?? this.models,
+      models: models == null ? this.models : normalizeModelIds(models),
     );
   }
 
   factory ModelProviderConfig.fromJson(Map<String, dynamic> json) {
     final Object? rawModels = json['ModelList'];
     final List<String> modelList = rawModels is List
-        ? rawModels.whereType<String>().toList(growable: false)
+        ? normalizeModelIds(rawModels.whereType<String>())
         : const <String>[];
 
     return ModelProviderConfig(
@@ -99,24 +111,28 @@ class VitsConfig {
 class SpeechInputConfig {
   const SpeechInputConfig({
     this.enable = false,
+    this.wakeEnabled = false,
     this.autoSend = false,
     this.baiduApiKey = '',
     this.baiduSecretKey = '',
   });
 
   final bool enable;
+  final bool wakeEnabled;
   final bool autoSend;
   final String baiduApiKey;
   final String baiduSecretKey;
 
   SpeechInputConfig copyWith({
     bool? enable,
+    bool? wakeEnabled,
     bool? autoSend,
     String? baiduApiKey,
     String? baiduSecretKey,
   }) {
     return SpeechInputConfig(
       enable: enable ?? this.enable,
+      wakeEnabled: wakeEnabled ?? this.wakeEnabled,
       autoSend: autoSend ?? this.autoSend,
       baiduApiKey: baiduApiKey ?? this.baiduApiKey,
       baiduSecretKey: baiduSecretKey ?? this.baiduSecretKey,
@@ -127,9 +143,13 @@ class SpeechInputConfig {
     final Map<String, dynamic> baiduMap =
         (json['Baidu'] as Map?)?.cast<String, dynamic>() ??
         const <String, dynamic>{};
+    final Map<String, dynamic> wakeMap =
+        (json['Wake'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
 
     return SpeechInputConfig(
       enable: _parseBool(json['Enable']),
+      wakeEnabled: _parseBool(wakeMap['Enable']),
       autoSend: _parseBool(json['AutoSend']),
       baiduApiKey: (baiduMap['ApiKey'] as String?)?.trim() ?? '',
       baiduSecretKey: (baiduMap['SecretKey'] as String?)?.trim() ?? '',
@@ -139,6 +159,7 @@ class SpeechInputConfig {
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'Enable': enable,
+      'Wake': <String, dynamic>{'Enable': wakeEnabled},
       'AutoSend': autoSend,
       'Baidu': <String, dynamic>{
         'ApiKey': baiduApiKey,
@@ -274,11 +295,16 @@ class AppConfig {
         provider: config,
       },
       vits: vits,
+      speechInput: speechInput,
     );
   }
 
   AppConfig copyWithVits(VitsConfig config) {
-    return AppConfig(providers: providers, vits: config);
+    return AppConfig(
+      providers: providers,
+      vits: config,
+      speechInput: speechInput,
+    );
   }
 
   AppConfig copyWithSpeechInput(SpeechInputConfig config) {
@@ -299,21 +325,82 @@ class AppConfig {
   }
 }
 
-class CharacterAssetConfig {
-  const CharacterAssetConfig({this.prompt = ''});
+class CharacterSpeechConfig {
+  const CharacterSpeechConfig({
+    this.wakeWords = const <String>[],
+    this.endWords = const <String>[],
+  });
 
-  final String prompt;
+  final List<String> wakeWords;
+  final List<String> endWords;
 
-  CharacterAssetConfig copyWith({String? prompt}) {
-    return CharacterAssetConfig(prompt: prompt ?? this.prompt);
+  CharacterSpeechConfig copyWith({
+    List<String>? wakeWords,
+    List<String>? endWords,
+  }) {
+    return CharacterSpeechConfig(
+      wakeWords: wakeWords ?? List<String>.from(this.wakeWords),
+      endWords: endWords ?? List<String>.from(this.endWords),
+    );
   }
 
-  factory CharacterAssetConfig.fromJson(Map<String, dynamic> json) {
-    return CharacterAssetConfig(prompt: (json['prompt'] as String?) ?? '');
+  factory CharacterSpeechConfig.fromJson(Map<String, dynamic> json) {
+    List<String> readWords(String key) {
+      final Object? value = json[key];
+      return value is List
+          ? value
+                .whereType<String>()
+                .map((String word) => word.trim())
+                .where((String word) => word.isNotEmpty)
+                .toList(growable: false)
+          : const <String>[];
+    }
+
+    return CharacterSpeechConfig(
+      wakeWords: readWords('wakeWords'),
+      endWords: readWords('endWords'),
+    );
   }
 
   Map<String, dynamic> toJson() {
-    return <String, dynamic>{'prompt': prompt};
+    return <String, dynamic>{'wakeWords': wakeWords, 'endWords': endWords};
+  }
+}
+
+class CharacterAssetConfig {
+  const CharacterAssetConfig({
+    this.prompt = '',
+    this.speechInput = const CharacterSpeechConfig(),
+  });
+
+  final String prompt;
+  final CharacterSpeechConfig speechInput;
+
+  CharacterAssetConfig copyWith({
+    String? prompt,
+    CharacterSpeechConfig? speechInput,
+  }) {
+    return CharacterAssetConfig(
+      prompt: prompt ?? this.prompt,
+      speechInput: speechInput ?? this.speechInput,
+    );
+  }
+
+  factory CharacterAssetConfig.fromJson(Map<String, dynamic> json) {
+    final Map<String, dynamic> speechMap =
+        (json['speechInput'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    return CharacterAssetConfig(
+      prompt: (json['prompt'] as String?) ?? '',
+      speechInput: CharacterSpeechConfig.fromJson(speechMap),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'prompt': prompt,
+      'speechInput': speechInput.toJson(),
+    };
   }
 }
 
@@ -327,6 +414,11 @@ class CharacterRuntimeConfig {
     this.vitsEnable = false,
     this.vitsMasSelect = '',
     this.tachieAnimations = const <String, String>{},
+    this.contextTokenLimit = 65536,
+    this.contextTokenLimitSource = '',
+    this.contextTokenModel = '',
+    this.contextTokenProvider = '',
+    this.contextAutoCompactThresholdPercent = 80,
   });
 
   final int tachieSize;
@@ -337,6 +429,11 @@ class CharacterRuntimeConfig {
   final bool vitsEnable;
   final String vitsMasSelect;
   final Map<String, String> tachieAnimations;
+  final int contextTokenLimit;
+  final String contextTokenLimitSource;
+  final String contextTokenModel;
+  final String contextTokenProvider;
+  final int contextAutoCompactThresholdPercent;
 
   LlmProviderType get provider => LlmProviderType.fromConfigKey(serverSelect);
 
@@ -349,6 +446,11 @@ class CharacterRuntimeConfig {
     bool? vitsEnable,
     String? vitsMasSelect,
     Map<String, String>? tachieAnimations,
+    int? contextTokenLimit,
+    String? contextTokenLimitSource,
+    String? contextTokenModel,
+    String? contextTokenProvider,
+    int? contextAutoCompactThresholdPercent,
   }) {
     return CharacterRuntimeConfig(
       tachieSize: tachieSize ?? this.tachieSize,
@@ -360,6 +462,14 @@ class CharacterRuntimeConfig {
       vitsMasSelect: vitsMasSelect ?? this.vitsMasSelect,
       tachieAnimations:
           tachieAnimations ?? Map<String, String>.from(this.tachieAnimations),
+      contextTokenLimit: contextTokenLimit ?? this.contextTokenLimit,
+      contextTokenLimitSource:
+          contextTokenLimitSource ?? this.contextTokenLimitSource,
+      contextTokenModel: contextTokenModel ?? this.contextTokenModel,
+      contextTokenProvider: contextTokenProvider ?? this.contextTokenProvider,
+      contextAutoCompactThresholdPercent:
+          contextAutoCompactThresholdPercent ??
+          this.contextAutoCompactThresholdPercent,
     );
   }
 
@@ -374,6 +484,14 @@ class CharacterRuntimeConfig {
     final Object? rawOffsetY = json['tachieOffsetY'];
     final Object? rawVitsEnable = json['vitsEnable'];
     final Object? rawTachieAnimations = json['tachieAnimations'];
+    final int contextTokenLimit = _parseInt(
+      json['contextTokenLimit'],
+      fallback: 65536,
+    );
+    final int contextAutoCompactThresholdPercent = _parseInt(
+      json['contextAutoCompactThresholdPercent'],
+      fallback: 80,
+    );
 
     final Map<String, String> tachieAnimations = <String, String>{};
     if (rawTachieAnimations is Map) {
@@ -411,6 +529,20 @@ class CharacterRuntimeConfig {
       },
       vitsMasSelect: (json['vitsMasSelect'] as String?) ?? '',
       tachieAnimations: tachieAnimations,
+      contextTokenLimit:
+          contextTokenLimit >= 1024 && contextTokenLimit <= 10000000
+          ? contextTokenLimit
+          : 65536,
+      contextTokenLimitSource:
+          (json['contextTokenLimitSource'] as String?)?.trim() ?? '',
+      contextTokenModel: (json['contextTokenModel'] as String?)?.trim() ?? '',
+      contextTokenProvider:
+          (json['contextTokenProvider'] as String?)?.trim() ?? '',
+      contextAutoCompactThresholdPercent:
+          contextAutoCompactThresholdPercent >= 50 &&
+              contextAutoCompactThresholdPercent <= 95
+          ? contextAutoCompactThresholdPercent
+          : 80,
     );
   }
 
@@ -424,8 +556,22 @@ class CharacterRuntimeConfig {
       'vitsEnable': vitsEnable,
       'vitsMasSelect': vitsMasSelect,
       'tachieAnimations': tachieAnimations,
+      'contextTokenLimit': contextTokenLimit,
+      'contextTokenLimitSource': contextTokenLimitSource,
+      'contextTokenModel': contextTokenModel,
+      'contextTokenProvider': contextTokenProvider,
+      'contextAutoCompactThresholdPercent': contextAutoCompactThresholdPercent,
     };
   }
+}
+
+int _parseInt(Object? value, {required int fallback}) {
+  return switch (value) {
+    int parsed => parsed,
+    num parsed => parsed.toInt(),
+    String parsed => int.tryParse(parsed) ?? fallback,
+    _ => fallback,
+  };
 }
 
 enum HistorySpeaker { user, role, system }
@@ -468,9 +614,15 @@ class HistoryEntry {
 }
 
 class ContextHistory {
-  const ContextHistory({required this.history});
+  const ContextHistory({
+    required this.history,
+    this.summary = '',
+    this.compactedHistoryCount = 0,
+  });
 
   final List<String> history;
+  final String summary;
+  final int compactedHistoryCount;
 
   List<HistoryEntry> get entries =>
       history.map(HistoryEntry.fromRawLine).toList(growable: false);
@@ -480,11 +632,33 @@ class ContextHistory {
     final List<String> lines = rawHistory is List
         ? rawHistory.whereType<String>().toList(growable: false)
         : const <String>[];
-    return ContextHistory(history: lines);
+    final Map<String, dynamic> compaction =
+        (json['compaction'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    final String summary = (compaction['summary'] as String?)?.trim() ?? '';
+    final int compactedHistoryCount = _parseInt(
+      compaction['historyCount'],
+      fallback: 0,
+    );
+    final bool validCompaction =
+        summary.isNotEmpty &&
+        compactedHistoryCount > 0 &&
+        compactedHistoryCount <= lines.length;
+    return ContextHistory(
+      history: lines,
+      summary: validCompaction ? summary : '',
+      compactedHistoryCount: validCompaction ? compactedHistoryCount : 0,
+    );
   }
 
   Map<String, dynamic> toJson() {
-    return <String, dynamic>{'history': history};
+    return <String, dynamic>{
+      'history': history,
+      'compaction': <String, dynamic>{
+        'summary': summary,
+        'historyCount': compactedHistoryCount,
+      },
+    };
   }
 }
 

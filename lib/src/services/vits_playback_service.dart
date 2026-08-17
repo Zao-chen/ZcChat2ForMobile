@@ -1,19 +1,17 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/foundation.dart';
 
+import 'app_logger.dart';
 import 'vits_service.dart';
 
 class VitsPlaybackService implements VitsPlayback {
-  VitsPlaybackService({
-    required this.service,
-    AudioPlayer? player,
-  }) : _player = player ?? AudioPlayer() {
+  VitsPlaybackService({required this.service, AudioPlayer? player})
+    : _player = player ?? AudioPlayer() {
     _completionSubscription = _player.onPlayerComplete.listen((_) {
       _isPlaying = false;
-      unawaited(_startNextPlayback());
+      unawaited(_handlePlaybackCompleted());
     });
     unawaited(_player.setReleaseMode(ReleaseMode.stop));
   }
@@ -29,6 +27,7 @@ class VitsPlaybackService implements VitsPlayback {
   bool _isPlaying = false;
   int _sessionToken = 0;
   int _requestVersion = 0;
+  Completer<void>? _idleCompleter;
 
   @override
   Future<void> enqueueSegments({
@@ -44,6 +43,7 @@ class VitsPlaybackService implements VitsPlayback {
       return;
     }
 
+    _idleCompleter ??= Completer<void>();
     final int token = _sessionToken;
     for (final String segment in segments) {
       _pendingSegments.add(
@@ -69,6 +69,13 @@ class VitsPlaybackService implements VitsPlayback {
     _requestInFlight = false;
     _isPlaying = false;
     await _player.stop();
+    _completeIdleIfNeeded();
+  }
+
+  @override
+  Future<void> waitUntilIdle() {
+    _completeIdleIfNeeded();
+    return _idleCompleter?.future ?? Future<void>.value();
   }
 
   Future<void> _startNextRequest() async {
@@ -92,11 +99,15 @@ class VitsPlaybackService implements VitsPlayback {
         await _startNextPlayback();
       }
     } catch (error) {
-      debugPrint('VITS synthesis failed: $error');
+      AppLogger.warning(
+        'vits.synthesis.failed',
+        fields: <String, Object?>{'message': error},
+      );
     } finally {
       if (requestVersion == _requestVersion) {
         _requestInFlight = false;
         unawaited(_startNextRequest());
+        _completeIdleIfNeeded();
       }
     }
   }
@@ -116,11 +127,34 @@ class VitsPlaybackService implements VitsPlayback {
       try {
         await _player.play(BytesSource(audio.bytes));
       } catch (error) {
-        debugPrint('VITS playback failed: $error');
+        AppLogger.warning(
+          'vits.playback.failed',
+          fields: <String, Object?>{'message': error},
+        );
         _isPlaying = false;
         continue;
       }
       return;
+    }
+    _completeIdleIfNeeded();
+  }
+
+  Future<void> _handlePlaybackCompleted() async {
+    await _startNextPlayback();
+    _completeIdleIfNeeded();
+  }
+
+  void _completeIdleIfNeeded() {
+    if (_requestInFlight ||
+        _isPlaying ||
+        _pendingSegments.isNotEmpty ||
+        _readyAudios.isNotEmpty) {
+      return;
+    }
+    final Completer<void>? completer = _idleCompleter;
+    _idleCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
     }
   }
 
@@ -146,10 +180,7 @@ class _QueuedVitsSegment {
 }
 
 class _QueuedVitsAudio {
-  const _QueuedVitsAudio({
-    required this.token,
-    required this.bytes,
-  });
+  const _QueuedVitsAudio({required this.token, required this.bytes});
 
   final int token;
   final Uint8List bytes;

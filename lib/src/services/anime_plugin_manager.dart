@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../models/anime_plugin_models.dart';
+import 'app_logger.dart';
 
 class AnimePluginManager {
   const AnimePluginManager();
@@ -38,7 +39,13 @@ class AnimePluginManager {
           file.path,
         );
         if (pluginNameSet.contains(plugin.name)) {
-          errors.add('插件名重复[${_fileName(file.path)}]: ${plugin.name}');
+          final String message =
+              '插件名重复[${_fileName(file.path)}]: ${plugin.name}';
+          errors.add(message);
+          AppLogger.warning(
+            'anime_plugin.duplicate_name',
+            fields: <String, Object?>{'message': message},
+          );
           continue;
         }
 
@@ -47,7 +54,13 @@ class AnimePluginManager {
         for (final AnimePluginAnimation animation in plugin.animations) {
           final String uniqueKey = animation.buildUniqueKey(plugin.name);
           if (index.containsKey(uniqueKey)) {
-            errors.add('动画唯一键重复[${_fileName(file.path)}]: $uniqueKey');
+            final String message =
+                '动画唯一键重复[${_fileName(file.path)}]: $uniqueKey';
+            errors.add(message);
+            AppLogger.warning(
+              'anime_plugin.duplicate_animation',
+              fields: <String, Object?>{'message': message},
+            );
             continue;
           }
           animationUniqueKeys.add(uniqueKey);
@@ -57,9 +70,22 @@ class AnimePluginManager {
           );
         }
       } catch (error) {
-        errors.add('插件加载失败[${_fileName(file.path)}]: $error');
+        final String message = '插件加载失败[${_fileName(file.path)}]: $error';
+        errors.add(message);
+        AppLogger.warning(
+          'anime_plugin.load_failed',
+          fields: <String, Object?>{'message': message},
+        );
       }
     }
+
+    AppLogger.info(
+      'anime_plugin.reload.completed',
+      fields: <String, Object?>{
+        'plugin_count': plugins.length,
+        'error_count': errors.length,
+      },
+    );
 
     return AnimePluginRegistry(
       plugins: plugins,

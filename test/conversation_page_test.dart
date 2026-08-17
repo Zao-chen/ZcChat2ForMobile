@@ -1,4 +1,5 @@
-﻿import 'dart:io';
+import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -52,6 +53,9 @@ class FakeVitsPlayback implements VitsPlayback {
   Future<void> stop() async {}
 
   @override
+  Future<void> waitUntilIdle() async {}
+
+  @override
   void dispose() {}
 }
 
@@ -61,32 +65,30 @@ void main() {
   testWidgets(
     'conversation page sends text and continues by tapping input box',
     (WidgetTester tester) async {
-      final Directory tempDir = await Directory.systemTemp.createTemp(
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 844);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+
+      final Directory tempDir = Directory.systemTemp.createTempSync(
         'zcchat2_page_test_',
       );
-      addTearDown(() => tempDir.delete(recursive: true));
+      addTearDown(() {
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
 
       final AppStoragePaths paths = AppStoragePaths(tempDir);
-      await AppBootstrap.ensureInitialized(storagePaths: paths);
 
-      final CharacterRepository characterRepository = CharacterRepository(paths);
+      final CharacterRepository characterRepository = CharacterRepository(
+        paths,
+      );
       final SettingsRepository settingsRepository = SettingsRepository(paths);
       final ConversationRepository conversationRepository =
           ConversationRepository(paths, characterRepository);
-
-      await settingsRepository.saveProviderApiKey(
-        LlmProviderType.deepSeek,
-        'fake-key',
-      );
-      await settingsRepository.saveProviderModels(
-        LlmProviderType.deepSeek,
-        const <String>['fake-model'],
-      );
-      await characterRepository.saveCharacterProvider(
-        'test',
-        LlmProviderType.deepSeek,
-      );
-      await characterRepository.saveCharacterModel('test', 'fake-model');
 
       final ConversationController controller = ConversationController(
         characterRepository: characterRepository,
@@ -98,7 +100,26 @@ void main() {
         },
         vitsPlayback: FakeVitsPlayback(),
       );
-      await controller.initialize();
+      await tester.runAsync(() async {
+        await AppBootstrap.ensureInitialized(storagePaths: paths);
+        await settingsRepository.saveProviderApiKey(
+          LlmProviderType.deepSeek,
+          'fake-key',
+        );
+        await settingsRepository.saveProviderModels(
+          LlmProviderType.deepSeek,
+          const <String>['fake-model'],
+        );
+        await characterRepository.saveCharacterProvider(
+          'test',
+          LlmProviderType.deepSeek,
+        );
+        await characterRepository.saveCharacterModel('test', 'fake-model');
+        await controller.initialize();
+      });
+      controller.appConfig = controller.appConfig.copyWithSpeechInput(
+        controller.appConfig.speechInput.copyWith(enable: true),
+      );
 
       await tester.pumpWidget(
         MaterialApp(
@@ -110,18 +131,43 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      expect(find.text('你'), findsOneWidget);
+      expect(find.text('按住说话'), findsOneWidget);
+      expect(find.text('识别后自动发送'), findsOneWidget);
+      expect(find.textContaining('剩余'), findsNothing);
+
+      await tester.tap(find.byType(LinearProgressIndicator));
+      await tester.pumpAndSettle();
+      expect(find.text('上下文详情'), findsOneWidget);
+      await tester.tap(find.byType(ModalBarrier).last);
+      await tester.pumpAndSettle();
+
       await tester.enterText(find.byType(TextField), '你好');
-      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.runAsync(() async {
+        await tester.testTextInput.receiveAction(TextInputAction.send);
+        await _waitUntil(() => controller.history.entries.isNotEmpty);
+      });
       await tester.pump();
       await tester.pumpAndSettle();
 
       expect(find.text('今天天气很好'), findsOneWidget);
-      expect(find.byIcon(Icons.touch_app_rounded), findsOneWidget);
+      expect(find.text('轻触这里继续对话'), findsOneWidget);
 
       await tester.tap(find.byType(TextField));
       await tester.pumpAndSettle();
 
-      expect(find.byIcon(Icons.keyboard_return_rounded), findsOneWidget);
+      expect(find.text('说点什么吧 (Shift+Enter换行 Enter发送)'), findsOneWidget);
+      controller.dispose();
     },
   );
+}
+
+Future<void> _waitUntil(bool Function() predicate) async {
+  final DateTime deadline = DateTime.now().add(const Duration(seconds: 5));
+  while (!predicate()) {
+    if (DateTime.now().isAfter(deadline)) {
+      throw TimeoutException('等待页面异步状态超时');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
 }

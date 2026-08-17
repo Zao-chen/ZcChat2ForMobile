@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import '../models/app_models.dart';
 import '../models/anime_plugin_models.dart';
 import '../services/anime_plugin_manager.dart';
+import '../services/context_history_compressor.dart';
 import 'app_storage_paths.dart';
 import 'web_preview_storage.dart';
 
@@ -252,6 +253,19 @@ class CharacterRepository {
     );
   }
 
+  Future<void> saveCharacterSpeechConfig(
+    String characterName,
+    CharacterSpeechConfig speechInput,
+  ) async {
+    final CharacterAssetConfig current = await loadCharacterAssetConfig(
+      characterName,
+    );
+    await _writeJsonObject(
+      paths.characterAssetConfigFile(characterName),
+      current.copyWith(speechInput: speechInput).toJson(),
+    );
+  }
+
   Future<void> saveTachieSize(String characterName, int size) async {
     final CharacterRuntimeConfig current = await loadCharacterRuntimeConfig(
       characterName,
@@ -315,6 +329,42 @@ class CharacterRepository {
     await _writeJsonObject(
       paths.characterRuntimeConfigFile(characterName),
       current.copyWith(modelSelect: modelId).toJson(),
+    );
+  }
+
+  Future<void> saveCharacterContextTokenLimit(
+    String characterName, {
+    required int tokenLimit,
+    required String source,
+    required String model,
+    required String provider,
+  }) async {
+    final CharacterRuntimeConfig current = await loadCharacterRuntimeConfig(
+      characterName,
+    );
+    await _writeJsonObject(
+      paths.characterRuntimeConfigFile(characterName),
+      current
+          .copyWith(
+            contextTokenLimit: tokenLimit,
+            contextTokenLimitSource: source,
+            contextTokenModel: model.trim(),
+            contextTokenProvider: provider.trim(),
+          )
+          .toJson(),
+    );
+  }
+
+  Future<void> saveCharacterContextAutoCompactThreshold(
+    String characterName,
+    int percent,
+  ) async {
+    final CharacterRuntimeConfig current = await loadCharacterRuntimeConfig(
+      characterName,
+    );
+    await _writeJsonObject(
+      paths.characterRuntimeConfigFile(characterName),
+      current.copyWith(contextAutoCompactThresholdPercent: percent).toJson(),
     );
   }
 
@@ -632,13 +682,45 @@ class ConversationRepository {
     final String selectedCharacter = await characterRepository
         .getSelectedCharacter();
     final ContextHistory history = await loadHistory(selectedCharacter);
-    if (history.history.isEmpty) {
+    return buildUserMessageWithHistory(input, activeHistory(history));
+  }
+
+  List<String> activeHistory(ContextHistory history) {
+    return ContextHistoryCompressor.activeHistory(
+      fullHistory: history.history,
+      summary: history.summary,
+      compactedHistoryCount: history.compactedHistoryCount,
+    );
+  }
+
+  String buildUserMessageWithHistory(String input, List<String> history) {
+    if (history.isEmpty) {
       return input;
     }
-
     return '以下是你和用户最近的对话，请继续上下文并保持人设一致：\n'
-        '${history.history.join('\n')}\n\n'
+        '${history.join('\n')}\n\n'
         '用户当前输入：$input';
+  }
+
+  Future<void> saveCompaction({
+    required String characterName,
+    required String summary,
+    required int compactedHistoryCount,
+  }) async {
+    final ContextHistory history = await loadHistory(characterName);
+    if (summary.trim().isEmpty ||
+        compactedHistoryCount <= 0 ||
+        compactedHistoryCount > history.history.length) {
+      return;
+    }
+    await _saveHistory(
+      characterName,
+      ContextHistory(
+        history: history.history,
+        summary: summary.trim(),
+        compactedHistoryCount: compactedHistoryCount,
+      ),
+    );
   }
 
   Future<void> appendUserLine(String text) async {
@@ -668,7 +750,17 @@ class ConversationRepository {
       text: newText,
     );
     lines[index] = updatedEntry.toRawLine();
-    await _saveHistory(selectedCharacter, lines);
+    final bool preservesCompaction = index >= history.compactedHistoryCount;
+    await _saveHistory(
+      selectedCharacter,
+      ContextHistory(
+        history: lines,
+        summary: preservesCompaction ? history.summary : '',
+        compactedHistoryCount: preservesCompaction
+            ? history.compactedHistoryCount
+            : 0,
+      ),
+    );
   }
 
   Future<void> deleteLine(int index) async {
@@ -680,7 +772,7 @@ class ConversationRepository {
       return;
     }
     lines.removeAt(index);
-    await _saveHistory(selectedCharacter, lines);
+    await _saveHistory(selectedCharacter, ContextHistory(history: lines));
   }
 
   /// 回退到指定位置：保留 [0, index) 的记录，删除 index 及之后的所有记录。
@@ -690,20 +782,36 @@ class ConversationRepository {
     final ContextHistory history = await loadHistory(selectedCharacter);
     final List<String> lines = List<String>.from(history.history);
     if (index <= 0) {
-      await _saveHistory(selectedCharacter, <String>[]);
+      await _saveHistory(
+        selectedCharacter,
+        const ContextHistory(history: <String>[]),
+      );
       return;
     }
     if (index >= lines.length) {
       return;
     }
     final List<String> kept = lines.sublist(0, index);
-    await _saveHistory(selectedCharacter, kept);
+    final bool preservesCompaction = index >= history.compactedHistoryCount;
+    await _saveHistory(
+      selectedCharacter,
+      ContextHistory(
+        history: kept,
+        summary: preservesCompaction ? history.summary : '',
+        compactedHistoryCount: preservesCompaction
+            ? history.compactedHistoryCount
+            : 0,
+      ),
+    );
   }
 
   Future<void> clearHistory() async {
     final String selectedCharacter = await characterRepository
         .getSelectedCharacter();
-    await _saveHistory(selectedCharacter, <String>[]);
+    await _saveHistory(
+      selectedCharacter,
+      const ContextHistory(history: <String>[]),
+    );
   }
 
   Future<void> _appendLine(String line) async {
@@ -711,13 +819,23 @@ class ConversationRepository {
         .getSelectedCharacter();
     final ContextHistory history = await loadHistory(selectedCharacter);
     final List<String> lines = List<String>.from(history.history)..add(line);
-    await _saveHistory(selectedCharacter, lines);
+    await _saveHistory(
+      selectedCharacter,
+      ContextHistory(
+        history: lines,
+        summary: history.summary,
+        compactedHistoryCount: history.compactedHistoryCount,
+      ),
+    );
   }
 
-  Future<void> _saveHistory(String characterName, List<String> lines) async {
+  Future<void> _saveHistory(
+    String characterName,
+    ContextHistory history,
+  ) async {
     await _writeJsonObject(
       paths.characterContextFile(characterName),
-      ContextHistory(history: lines).toJson(),
+      history.toJson(),
     );
   }
 }
@@ -936,6 +1054,15 @@ class WebPreviewCharacterRepository extends CharacterRepository {
   }
 
   @override
+  Future<void> saveCharacterSpeechConfig(
+    String characterName,
+    CharacterSpeechConfig speechInput,
+  ) async {
+    _assetConfig = _assetConfig.copyWith(speechInput: speechInput);
+    _saveAssetConfig();
+  }
+
+  @override
   Future<void> saveTachieSize(String characterName, int size) async {
     _runtimeConfig = _runtimeConfig.copyWith(tachieSize: size);
     _saveRuntimeConfig();
@@ -981,6 +1108,34 @@ class WebPreviewCharacterRepository extends CharacterRepository {
   @override
   Future<void> saveCharacterModel(String characterName, String modelId) async {
     _runtimeConfig = _runtimeConfig.copyWith(modelSelect: modelId);
+    _saveRuntimeConfig();
+  }
+
+  @override
+  Future<void> saveCharacterContextTokenLimit(
+    String characterName, {
+    required int tokenLimit,
+    required String source,
+    required String model,
+    required String provider,
+  }) async {
+    _runtimeConfig = _runtimeConfig.copyWith(
+      contextTokenLimit: tokenLimit,
+      contextTokenLimitSource: source,
+      contextTokenModel: model.trim(),
+      contextTokenProvider: provider.trim(),
+    );
+    _saveRuntimeConfig();
+  }
+
+  @override
+  Future<void> saveCharacterContextAutoCompactThreshold(
+    String characterName,
+    int percent,
+  ) async {
+    _runtimeConfig = _runtimeConfig.copyWith(
+      contextAutoCompactThresholdPercent: percent,
+    );
     _saveRuntimeConfig();
   }
 
@@ -1057,96 +1212,138 @@ class WebPreviewCharacterRepository extends CharacterRepository {
 
 class WebPreviewConversationRepository extends ConversationRepository {
   WebPreviewConversationRepository(super.characterRepository, this.storage)
-    : _history = ContextHistory.fromJson(
+    : _contextHistory = ContextHistory.fromJson(
         _readStoredJsonObject(storage, _historyKey),
-      ).history.toList(growable: true),
+      ),
       super.webPreview();
 
   static const String _historyKey = 'zcchat2.webPreview.history';
 
   final WebPreviewStorage storage;
-  final List<String> _history;
+  ContextHistory _contextHistory;
 
   void _persistHistory() {
-    _writeStoredJsonObject(
-      storage,
-      _historyKey,
-      ContextHistory(history: _history).toJson(),
-    );
+    _writeStoredJsonObject(storage, _historyKey, _contextHistory.toJson());
   }
 
   @override
   Future<ContextHistory> loadHistory(String characterName) async {
-    return ContextHistory(history: List<String>.from(_history));
+    return ContextHistory(
+      history: List<String>.from(_contextHistory.history),
+      summary: _contextHistory.summary,
+      compactedHistoryCount: _contextHistory.compactedHistoryCount,
+    );
   }
 
   @override
   Future<String> buildUserMessageWithContext(String input) async {
-    if (_history.isEmpty) {
-      return input;
+    return buildUserMessageWithHistory(input, activeHistory(_contextHistory));
+  }
+
+  @override
+  Future<void> saveCompaction({
+    required String characterName,
+    required String summary,
+    required int compactedHistoryCount,
+  }) async {
+    if (summary.trim().isEmpty ||
+        compactedHistoryCount <= 0 ||
+        compactedHistoryCount > _contextHistory.history.length) {
+      return;
     }
-    return '以下是你和用户最近的对话，请继续上下文并保持人设一致：\n'
-        '${_history.join('\n')}\n\n'
-        '用户当前输入：$input';
+    _contextHistory = ContextHistory(
+      history: _contextHistory.history,
+      summary: summary.trim(),
+      compactedHistoryCount: compactedHistoryCount,
+    );
+    _persistHistory();
   }
 
   @override
   Future<void> appendUserLine(String text) async {
-    _history.add(
-      HistoryEntry(speaker: HistorySpeaker.user, text: text).toRawLine(),
+    _contextHistory = ContextHistory(
+      history: <String>[
+        ..._contextHistory.history,
+        HistoryEntry(speaker: HistorySpeaker.user, text: text).toRawLine(),
+      ],
+      summary: _contextHistory.summary,
+      compactedHistoryCount: _contextHistory.compactedHistoryCount,
     );
     _persistHistory();
   }
 
   @override
   Future<void> appendRoleLine(String text) async {
-    _history.add(
-      HistoryEntry(speaker: HistorySpeaker.role, text: text).toRawLine(),
+    _contextHistory = ContextHistory(
+      history: <String>[
+        ..._contextHistory.history,
+        HistoryEntry(speaker: HistorySpeaker.role, text: text).toRawLine(),
+      ],
+      summary: _contextHistory.summary,
+      compactedHistoryCount: _contextHistory.compactedHistoryCount,
     );
     _persistHistory();
   }
 
   @override
   Future<void> updateLine(int index, String newText) async {
-    if (index < 0 || index >= _history.length) {
+    if (index < 0 || index >= _contextHistory.history.length) {
       return;
     }
-    final HistoryEntry originalEntry = HistoryEntry.fromRawLine(
-      _history[index],
-    );
-    _history[index] = HistoryEntry(
+    final List<String> lines = List<String>.from(_contextHistory.history);
+    final HistoryEntry originalEntry = HistoryEntry.fromRawLine(lines[index]);
+    lines[index] = HistoryEntry(
       speaker: originalEntry.speaker,
       text: newText,
     ).toRawLine();
+    final bool preservesCompaction =
+        index >= _contextHistory.compactedHistoryCount;
+    _contextHistory = ContextHistory(
+      history: lines,
+      summary: preservesCompaction ? _contextHistory.summary : '',
+      compactedHistoryCount: preservesCompaction
+          ? _contextHistory.compactedHistoryCount
+          : 0,
+    );
     _persistHistory();
   }
 
   @override
   Future<void> deleteLine(int index) async {
-    if (index < 0 || index >= _history.length) {
+    if (index < 0 || index >= _contextHistory.history.length) {
       return;
     }
-    _history.removeAt(index);
+    final List<String> lines = List<String>.from(_contextHistory.history)
+      ..removeAt(index);
+    _contextHistory = ContextHistory(history: lines);
     _persistHistory();
   }
 
   @override
   Future<void> rollbackTo(int index) async {
     if (index <= 0) {
-      _history.clear();
+      _contextHistory = const ContextHistory(history: <String>[]);
       _persistHistory();
       return;
     }
-    if (index >= _history.length) {
+    if (index >= _contextHistory.history.length) {
       return;
     }
-    _history.removeRange(index, _history.length);
+    final bool preservesCompaction =
+        index >= _contextHistory.compactedHistoryCount;
+    _contextHistory = ContextHistory(
+      history: _contextHistory.history.sublist(0, index),
+      summary: preservesCompaction ? _contextHistory.summary : '',
+      compactedHistoryCount: preservesCompaction
+          ? _contextHistory.compactedHistoryCount
+          : 0,
+    );
     _persistHistory();
   }
 
   @override
   Future<void> clearHistory() async {
-    _history.clear();
+    _contextHistory = const ContextHistory(history: <String>[]);
     _persistHistory();
   }
 }

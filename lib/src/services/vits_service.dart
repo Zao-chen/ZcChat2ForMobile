@@ -30,5 +30,7 @@ abstract class VitsPlayback {
 
   Future<void> stop();
 
+  Future<void> waitUntilIdle() async {}
+
   void dispose() {}
 }

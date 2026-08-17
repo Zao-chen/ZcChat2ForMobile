@@ -14,6 +14,8 @@ class AppStoragePaths {
 
   File get appIniFile => File(p.join(rootDirectory.path, 'config.ini'));
 
+  File get logFile => File(p.join(rootDirectory.path, 'log.txt'));
+
   Directory get characterAssetsDirectory =>
       Directory(p.join(rootDirectory.path, 'Character', 'Assets'));
 

@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/app_models.dart';
 import '../repositories/app_storage_paths.dart';
+import '../services/app_logger.dart';
 
 class AppBootstrap {
   static const String _defaultTachieAssetPath =
@@ -32,6 +33,11 @@ class AppBootstrap {
     }
 
     await paths.rootDirectory.create(recursive: true);
+    await AppLogger.initialize(paths.logFile.path);
+    AppLogger.info(
+      'bootstrap.started',
+      fields: <String, Object?>{'root': paths.rootDirectory.path},
+    );
     await paths.characterAssetsDirectory.create(recursive: true);
     await paths.characterUserConfigDirectory.create(recursive: true);
     await paths.animePluginDirectory.create(recursive: true);
@@ -70,6 +76,10 @@ class AppBootstrap {
             const JsonEncoder.withIndent('  ').convert(
               const CharacterAssetConfig(
                 prompt: '你是一名温柔、自然的二次元角色，请用轻松的语气与用户对话。',
+                speechInput: CharacterSpeechConfig(
+                  wakeWords: <String>['test'],
+                  endWords: <String>['结束对话'],
+                ),
               ).toJson(),
             ),
           );
@@ -103,6 +113,7 @@ class AppBootstrap {
       assetBundle: resolvedAssetBundle,
     );
 
+    AppLogger.info('bootstrap.completed');
     return paths;
   }
 

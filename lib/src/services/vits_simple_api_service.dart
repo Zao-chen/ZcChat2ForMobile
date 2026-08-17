@@ -1,20 +1,37 @@
-﻿import 'dart:convert';
+import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'app_logger.dart';
 import 'vits_service.dart';
 
 class VitsSimpleApiService implements VitsService {
-  VitsSimpleApiService({http.Client? client}) : _client = client ?? http.Client();
+  VitsSimpleApiService({http.Client? client})
+    : _client = client ?? http.Client();
 
   final http.Client _client;
+  static const Duration _requestTimeout = Duration(seconds: 30);
 
   @override
   Future<List<String>> fetchModelAndSpeakers(String apiUrl) async {
     final Uri uri = _buildBaseUri(apiUrl).resolve('voice/speakers');
-    final http.Response response = await _client.get(uri);
+    AppLogger.info(
+      'vits.voice_list.started',
+      fields: <String, Object?>{'endpoint': uri},
+    );
+    final http.Response response;
+    try {
+      response = await _client.get(uri).timeout(_requestTimeout);
+    } on TimeoutException {
+      throw const VitsException('获取角色列表超时，请检查 VITS 服务');
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      AppLogger.warning(
+        'vits.voice_list.failed',
+        fields: <String, Object?>{'status': response.statusCode},
+      );
       throw VitsException(_extractError(response.body, fallback: '获取角色列表失败'));
     }
 
@@ -43,6 +60,10 @@ class VitsSimpleApiService implements VitsService {
       }
     }
 
+    AppLogger.info(
+      'vits.voice_list.completed',
+      fields: <String, Object?>{'voice_count': items.length},
+    );
     return items;
   }
 
@@ -52,16 +73,36 @@ class VitsSimpleApiService implements VitsService {
     required String modelAndSpeaker,
     required String text,
   }) async {
-    final _ParsedModelAndSpeaker parsed = _parseModelAndSpeaker(modelAndSpeaker);
+    final _ParsedModelAndSpeaker parsed = _parseModelAndSpeaker(
+      modelAndSpeaker,
+    );
     final Uri uri = _buildBaseUri(apiUrl)
         .resolve('voice/${parsed.model}')
-        .replace(queryParameters: <String, String>{
-      'id': parsed.speaker,
-      'text': text,
-    });
+        .replace(
+          queryParameters: <String, String>{'id': parsed.speaker, 'text': text},
+        );
 
-    final http.Response response = await _client.get(uri);
+    AppLogger.info(
+      'vits.synthesis.started',
+      fields: <String, Object?>{
+        'model': parsed.model,
+        'text_characters': text.length,
+      },
+    );
+    final http.Response response;
+    try {
+      response = await _client.get(uri).timeout(_requestTimeout);
+    } on TimeoutException {
+      throw const VitsException('语音合成超时，请检查 VITS 服务');
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      AppLogger.warning(
+        'vits.synthesis.failed',
+        fields: <String, Object?>{
+          'model': parsed.model,
+          'status': response.statusCode,
+        },
+      );
       throw VitsException(
         _extractError(
           utf8.decode(response.bodyBytes, allowMalformed: true),
@@ -73,6 +114,13 @@ class VitsSimpleApiService implements VitsService {
       throw const VitsException('语音合成返回为空');
     }
 
+    AppLogger.info(
+      'vits.synthesis.completed',
+      fields: <String, Object?>{
+        'model': parsed.model,
+        'audio_bytes': response.bodyBytes.length,
+      },
+    );
     return Uint8List.fromList(response.bodyBytes);
   }
 
@@ -101,7 +149,7 @@ class VitsSimpleApiService implements VitsService {
 
     return _ParsedModelAndSpeaker(
       model: parts.first.toLowerCase(),
-      speaker: parts.sublist(2).join(' - '),
+      speaker: parts[1],
     );
   }
 
@@ -122,10 +170,7 @@ class VitsSimpleApiService implements VitsService {
 }
 
 class _ParsedModelAndSpeaker {
-  const _ParsedModelAndSpeaker({
-    required this.model,
-    required this.speaker,
-  });
+  const _ParsedModelAndSpeaker({required this.model, required this.speaker});
 
   final String model;
   final String speaker;
