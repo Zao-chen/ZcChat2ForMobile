@@ -135,6 +135,18 @@ void main() {
       expect(find.text('按住说话'), findsOneWidget);
       expect(find.text('识别后自动发送'), findsOneWidget);
       expect(find.textContaining('剩余'), findsNothing);
+      expect(find.text('说点什么吧'), findsOneWidget);
+      final TextField input = tester.widget<TextField>(find.byType(TextField));
+      expect(input.keyboardType, TextInputType.multiline);
+      expect(input.textInputAction, TextInputAction.newline);
+      expect(
+        tester
+            .widget<IconButton>(
+              find.byKey(const ValueKey<String>('send-message-button')),
+            )
+            .onPressed,
+        isNull,
+      );
 
       await tester.tap(find.byType(LinearProgressIndicator));
       await tester.pumpAndSettle();
@@ -143,8 +155,19 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField), '你好');
+      await tester.pump();
+      expect(
+        tester
+            .widget<IconButton>(
+              find.byKey(const ValueKey<String>('send-message-button')),
+            )
+            .onPressed,
+        isNotNull,
+      );
       await tester.runAsync(() async {
-        await tester.testTextInput.receiveAction(TextInputAction.send);
+        await tester.tap(
+          find.byKey(const ValueKey<String>('send-message-button')),
+        );
         await _waitUntil(() => controller.history.entries.isNotEmpty);
       });
       await tester.pump();
@@ -156,7 +179,7 @@ void main() {
       await tester.tap(find.byType(TextField));
       await tester.pumpAndSettle();
 
-      expect(find.text('说点什么吧 (Shift+Enter换行 Enter发送)'), findsOneWidget);
+      expect(find.text('说点什么吧'), findsOneWidget);
       controller.dispose();
     },
   );
